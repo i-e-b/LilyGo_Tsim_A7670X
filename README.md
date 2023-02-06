@@ -1,6 +1,12 @@
 # LilyGo_Tsim_A7670X
 T-SIM A7670 E development setup, tests, and notes
 
+## General notes
+
+None of the built-in LEDs can be directly flashed by the ESP32 CPU.
+* The red LEDs are under control of the SIMCOM module. They are `NETLIGHT` and `STATUS`.
+* The blue LEDs are under control of the CN3065 charge controller. They are `CHRG` and `STDBY`.
+
 ## SIM setup
 
 I am using a SIM card from https://hologram.io/ , with the Pilot (1MB) plan.
@@ -59,9 +65,9 @@ Make sure everything is powered up and is as described in the notes above
 
 The first program is just here to check we can connect the ESP32 module, run a program on it, and get the result back to the host PC.
 
-`HelloWorld.ino`
+`01_HelloWorld.ino`
 
-```
+```c
 #include "Arduino.h"
 
 void setup() {
@@ -89,7 +95,15 @@ back soon.
 
 If you see the correct output, move on to next test program.
 
-## Errors
+## Ping the modem
+
+This program tests the connection between the ESP32 (main CPU module) and the SIMCOM (cellular modem module)
+
+`02_HelloModem.ino`
+
+Upload and check the serial monitor. You should get the message `The SIMCOM A7670 Module replied OK to attention command. Looks good.` after some test data.
+
+# Errors
 
 ### Junk in Serial Monitor
 
