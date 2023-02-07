@@ -20,7 +20,7 @@ You should get the message:
 Your device is activated and ready for use on our network. We have not yet seen it connect to a local tower or pass data.
 ```
 
-## Arduino setup
+# Arduino setup
 
 Manufacturer's instructions are at: https://github.com/Xinyuan-LilyGO/T-A7670X
 
@@ -57,11 +57,11 @@ Manufacturer's instructions are at: https://github.com/Xinyuan-LilyGO/T-A7670X
         See "If you can't connect to the board" below.
 
 
-# Programming
+## Programming
 
 Make sure everything is powered up and is as described in the notes above
 
-## 01 First program: Local test
+### 01 First program: Local test
 
 The first program is just here to check we can connect the ESP32 module, run a program on it, and get the result back to the host PC.
 
@@ -95,7 +95,7 @@ back soon.
 
 If you see the correct output, move on to next test program.
 
-## 02 Ping the modem
+### 02 Ping the modem
 
 This program tests the connection between the ESP32 (main CPU module) and the SIMCOM (cellular modem module)
 
@@ -103,7 +103,7 @@ This program tests the connection between the ESP32 (main CPU module) and the SI
 
 Upload and check the serial monitor. You should get the message `The SIMCOM A7670 Module replied OK to attention command. Looks good.` after some test data.
 
-## 03 Modem library
+### 03 Modem library
 
 This program uses the built-in SIMCOM HTTP client to contact an external server, and send&receive data.
 
@@ -116,7 +116,7 @@ The Serial console should be written with the response from the HTTP server.
 
 This will use some of your data allocation.
 
-# Errors
+## Errors
 
 ### Junk in Serial Monitor
 
@@ -203,3 +203,58 @@ If nothing, USB cable might be damaged, or a bad usb port on PC?
 When working, it should have `QinHeng Electronics USB Single Serial`
 
 **Fix:** Test device in different USB ports, avoid using a hub. Try different cables.
+
+# VSCode + Platform IO set-up
+
+* The "PlatformIO" IDE installer is at: https://platformio.org/platformio-ide
+    * this is VSCode with a plug-in
+    * Installed from deb package at https://code.visualstudio.com/docs/?dv=linux64_deb (main download page at https://code.visualstudio.com/ )
+
+In VSCode:
+* File -> Preferences -> Extensions
+* Search for `PlatformIO` and install
+* Once installed, it should show a screen with a button "Install PlatformIO Core". Press this button.
+* When this is finished, it will prompt you to restart VSCode. Do this.
+* You should have a new icon-button on the left of VSCode window. Looks like an Alien head.
+    * This should have a link to "PIO Home", where you can do more set-up and create or load projects.
+
+* The PlatformIO tools will be using the Arduino compiler tooling under the hood, so make sure the Arduino setup is done
+* Make sure you create at least one project before loading existing ones.
+    * The first project creation takes a while, and will download the required tooling.
+
+When creating a new project:
+- **Name:** the new project name. Use characters [a-z0-9_-], no spaces or caps. PlatformIO can be fussy.
+- **Board:** `Espressif ESP-WROVER-KIT`
+- **Framework:** Arduino
+- **Location:** Storage location. Use characters [a-z0-9_-], no spaces or caps. PlatformIO can be fussy.
+
+## Building and uploading
+
+* Open the PlatformIO try, using the Alien head icon
+* Under `Project Tasks` > `esp32dev` > `General`
+    * Find the lines `Build` and `Upload and Monitor`
+    * Press either of these line once to trigger the action
+
+## Code formatting
+
+Other than the various settings and library documents, the code is the same between *Arduino IDE* and *PlatformIO IDE*.
+
+# CLion + Platform IO set-up
+
+Manufacturer's instructions are at: https://github.com/Xinyuan-LilyGO/T-A7670X
+
+* Make sure that CLion is installed (using JetBrains Toolbox, or via https://www.jetbrains.com/clion/ )
+    * Add the PlatformIo plugin ( https://plugins.jetbrains.com/plugin/13922-platformio-for-clion )
+        * (there is also https://plugins.jetbrains.com/plugin/11284-openocd--esp32-support-for-embedded-development , but not looking at that now )
+    * PlatformIO CLion docs are at: https://docs.platformio.org/en/latest/integration/ide/clion.html
+    * We will be using the Arduino compiler tooling for CLion projects, so make sure the Arduino setup is done
+
+* To create a PlatformIO project
+    1. In CLion, File -> New -> Project...
+    2. Select [Embedded] PlatformIO
+
+**NOTE:** The CLion integration for PlatformIO seems to be full of issues and work-arounds.
+https://docs.platformio.org/en/latest/integration/ide/clion.html
+
+Going to try the VSCode integration before looking into CLion.
+
