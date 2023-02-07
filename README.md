@@ -40,7 +40,7 @@ Manufacturer's instructions are at: https://github.com/Xinyuan-LilyGO/T-A7670X
 * Sketch -> Include Library -> Manage Libraries
     * `TinyGSM` by Volodymyr Shymanskyy (0.11.5)
     * `StreamDebugger` by Volodymyr Shymanskyy (1.0.1)
-    * `ArduinoHttpClient` by Arduino (0.4.0; LilyGo recommend https://github.com/ricemices/ArduinoHttpClient ; this README goes with the official Arduino library. Both options are derived from the same source: https://github.com/amcewen/HttpClient )
+    * `ArduinoHttpClient` by Arduino (0.4.0; LilyGo recommend https://github.com/ricemices/ArduinoHttpClient ; this README goes with the official Arduino library at https://github.com/arduino-libraries/ArduinoHttpClient . Both options are derived from the same source: https://github.com/amcewen/HttpClient )
 
 * Close and re-open Arduino.
 * Plug in the board using USB-C (the USB micro is for the SIMCOM modem only)
@@ -61,7 +61,7 @@ Manufacturer's instructions are at: https://github.com/Xinyuan-LilyGO/T-A7670X
 
 Make sure everything is powered up and is as described in the notes above
 
-## First program: Local test
+## 01 First program: Local test
 
 The first program is just here to check we can connect the ESP32 module, run a program on it, and get the result back to the host PC.
 
@@ -95,13 +95,26 @@ back soon.
 
 If you see the correct output, move on to next test program.
 
-## Ping the modem
+## 02 Ping the modem
 
 This program tests the connection between the ESP32 (main CPU module) and the SIMCOM (cellular modem module)
 
 `02_HelloModem.ino`
 
 Upload and check the serial monitor. You should get the message `The SIMCOM A7670 Module replied OK to attention command. Looks good.` after some test data.
+
+## 03 Modem library
+
+This program uses the built-in SIMCOM HTTP client to contact an external server, and send&receive data.
+
+`03_modem_library.ino`
+
+**Before running:** Check the constants at the top of the program file.
+Upload and run. Each time the program is run, the API will be called.
+Check the HTTP server to make sure the call is correctly formatted.
+The Serial console should be written with the response from the HTTP server.
+
+This will use some of your data allocation.
 
 # Errors
 

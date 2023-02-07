@@ -191,4 +191,6 @@ void loop() {
   Serial.print("z");
   delay(200);
   esp_deep_sleep_start(); // never returns. We will get reset with DEEPSLEEP_RESET
+
+  ESP.restart();
 }
