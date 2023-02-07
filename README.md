@@ -7,6 +7,8 @@ None of the built-in LEDs can be directly flashed by the ESP32 CPU.
 * The red LEDs are under control of the SIMCOM module. They are `NETLIGHT` and `STATUS`.
 * The blue LEDs are under control of the CN3065 charge controller. They are `CHRG` and `STDBY`.
 
+The *Table of Contents* in the SIMCOM datasheet starts page 20.
+
 ## SIM setup
 
 I am using a SIM card from https://hologram.io/ , with the Pilot (1MB) plan.

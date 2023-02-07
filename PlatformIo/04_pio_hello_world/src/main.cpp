@@ -54,14 +54,20 @@ void print_reset_reason(RESET_REASON reason){
   }
 }
 
+// Tunable delay between AT commands
+void atWait(){
+  delay(250);
+}
+
 // Send an 'AT' command to the SIMCOM module.
-// The command SHOULD end in "\r"
 // This will re-try on timeout
 int sendCommand(const char* cmd) {
   int i = 10;
   while (i) {
-    SerialAT.println(cmd);
-    if (i == 10) delay(1500);  // extra delay 1st time
+    SerialAT.print(cmd);
+    SerialAT.print("\r");
+
+    if (i == 10) delay(500);  // extra delay 1st time
 
     for (int j=0; j<5; j++){ // wait for reply
       delay(500);
@@ -130,7 +136,7 @@ void modemTurnOn() {
   delay(1000);
   digitalWrite(MODEM_POWER, LOW);
 
-  Serial.println(F("Modem On\r\n"));
+  Serial.println(F("Modem power-up starting\r\n"));
 }
 
 void setup() {
@@ -156,29 +162,28 @@ void setup() {
 
   // turn the modem on
   modemTurnOn();
-  delay(1000);
+  //delay(1000);
 
   // test with an 'AT' command
   Serial.println(F("Testing Modem Response..."));
-  int reply = sendCommand("AT\r");
-  delay(500);
-  Serial.println(F("Test finished"));
+  int reply = sendCommand("AT");
+  atWait();
   if (reply==false) {Serial.println(F("** Failed to connect to the modem! Check the baud and try again.**"));return;}
+  Serial.println(F("Modem is active and ready"));
 
-
-  delay(500);
-  reply = sendCommand("AT+CGATT?\r");
+  atWait();
+  reply = sendCommand("AT+CGATT?");
   if (reply==false) {Serial.println(F("Failed to read packet domain attach or detach status"));return;}
 
 
-  delay(500);
-  reply = sendCommand("AT+CGACT=1,1\r"); // try to attach cid 1? (Page 100)
+  atWait();
+  reply = sendCommand("AT+CGACT=1,1"); // try to attach cid 1? (Page 100)
   if (reply==false) {Serial.println(F("Failed to attach to PDP context"));return;}
   
   // This gives me a failure. Not sure why.
   // Set the "hologram" APN
   // This should be setting up a PDP? https://www.tutorialspoint.com/gprs/gprs_pdp_context.htm   https://en.wikipedia.org/wiki/GPRS_core_network
-  //reply = sendCommand("AT+CGDCONT=1,\"IP\",\"hologram\"\n"); // AT+CGDCONT: Define PDP context
+  //reply = sendCommand("AT+CGDCONT=0,\"IP\",\"hologram\"\n"); // AT+CGDCONT: Define PDP context
   //if (reply==false) {
   //  sendCommand("AT+CEER\r"); // Get detailed error report. See pages 504, 171
   //  Serial.println(F("Failed to set API"));
@@ -186,15 +191,15 @@ void setup() {
   //}
 
   // Start the SIMCOM HTTP(S) Service
-  reply = sendCommand("AT+HTTPINIT\r");
+  reply = sendCommand("AT+HTTPINIT");
   if (reply==false) {Serial.println(F("Failed to start HTTP service"));return;}
 
   // Set parameters for a HTTP call
-  reply = sendCommand("AT+HTTPPARA=\"URL\",\"https://tech.ewater.services/Experiments/CellTouch\"\r");
+  reply = sendCommand("AT+HTTPPARA=\"URL\",\"https://tech.ewater.services/Experiments/CellTouch\"");
   if (reply==false) {Serial.println(F("Failed to set URL"));return;}
-  reply = sendCommand("AT+HTTPPARA=\"CONTENT\",\"text/plain\"\r");
+  reply = sendCommand("AT+HTTPPARA=\"CONTENT\",\"text/plain\"");
   if (reply==false) {Serial.println(F("Failed to set content type"));return;}
-  reply = sendCommand("AT+HTTPPARA=\"ACCEPT\",\"*/*\"\r");
+  reply = sendCommand("AT+HTTPPARA=\"ACCEPT\",\"*/*\"");
   if (reply==false) {Serial.println(F("Failed to set accept type"));return;}
 
   // Upload the body data to SIMCOM module
@@ -202,18 +207,20 @@ void setup() {
   // "AT+HTTPDATA=<size>,<time>" -> DOWNLOAD\n<WRITE DATA TO SIMCOM>\nOK
   sendData("AT+HTTPDATA=52,10\r"); // bytes, time in seconds
   tryReadModem(); // skip over "DOWNLOAD"
-  reply = sendCommand("T-SIM message number 2. Hello to you in server land!\r"); // once we've written enough data, SIMCOM should end the download session by sending "OK"
+  reply = sendCommand("T-SIM message number 2. Hello to you in server land!"); // once we've written enough data, SIMCOM should end the download session by sending "OK"
   if (reply==false) {Serial.println(F("Failed to upload POST body"));return;}
 
-  delay(500);
+  atWait();
 
   // Send the request. Note, there are 6xx and 7xx errors the SIMCOM can output. See the datasheet page 322
   // this returns status code and {<method>,<statuscode>,<datalen>}. Example, for a successful get request: +HTTPACTION: 0,200,104220
-  reply = sendCommand("AT+HTTPACTION=1\r"); // 0=GET;1=POST;2=HEAD;3=DELETE;4=PUT
+  reply = sendCommand("AT+HTTPACTION=1"); // 0=GET;1=POST;2=HEAD;3=DELETE;4=PUT
   if (reply==false) {Serial.println(F("Failed to upload POST body"));return;}
 
-  delay(1000);
+  atWait();
   Serial.println("###### SUCCESS! Check the server side to confirm message sent ######");
+
+
 
   // "AT+HTTPREAD?" -> +HTTPREAD: LEN,<len> \n OK
   sendData("AT+HTTPREAD?\r"); // bytes, time in seconds
@@ -234,7 +241,7 @@ void setup() {
     return;
   }
 
-  // quick test?
+  // quick test? TODO: better string handling
   int ilen = 0;
   offs+=4; // skip "LEN,"
   Serial.print("[[");
@@ -258,7 +265,7 @@ void setup() {
   }
 
   char* commandStr;
-  if(0 > asprintf(&commandStr, "AT+HTTPREAD=%d\r", ilen)) {
+  if(0 > asprintf(&commandStr, "AT+HTTPREAD=%d", ilen)) {
     Serial.println("Failed to generate read command");
     return;
   }
@@ -273,7 +280,8 @@ void setup() {
 
 int i = 0;
 void loop() {
-  sendCommand("AT+CPOF\r"); // try to power-off the SIMCOM module.
+  sendCommand("AT+CPOF"); // try to power-off the SIMCOM module.
+  atWait();
 
   // Test is complete Set ESP32 to sleep mode
   Serial.print("Z");
