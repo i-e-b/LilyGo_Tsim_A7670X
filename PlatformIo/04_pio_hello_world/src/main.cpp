@@ -4,6 +4,9 @@
 // Basic Arduino stuff (Long-term TODO: remove this and do the low level stuff ourself)
 #include <Arduino.h>
 
+// Message we will send to the server
+const char* messageString = "This is a message from the T-SIM micro-controller. It is 🤓 Awesome !";
+
 #define SerialAT Serial1
 
 #define uS_TO_S 1000000ULL  // Conversion factor for micro seconds to seconds
@@ -91,10 +94,37 @@ int sendCommand(const char* cmd) {
   return false;
 }
 
+// Send an AT command to modem, with a variable numeric input
+int sendCommandF(const char* format, int i){
+  char* commandStr;
+  if(0 > asprintf(&commandStr, format, i)) {
+    Serial.println("Failed to generate command");
+    return false;
+  }
+  Serial.println(&commandStr[0]);
+
+  int result = sendCommand(&commandStr[0]);
+  free(commandStr);
+  return result;
+}
+
 // Send data to modem. Don't wait for any reply
 void sendData(const char* data) {
   SerialAT.println(data);
   delay(500);
+}
+
+// Send data to modem, with a variable numeric input
+void sendDataF(const char* format, int i){
+  char* commandStr;
+  if(0 > asprintf(&commandStr, format, i)) {
+    Serial.println("Failed to generate command");
+    return;
+  }
+  Serial.println(&commandStr[0]);
+
+  sendData(&commandStr[0]);
+  free(commandStr);
 }
 
 // Try to read data coming from the modem.
@@ -139,6 +169,37 @@ void modemTurnOn() {
   Serial.println(F("Modem power-up starting\r\n"));
 }
 
+int isInt(int c){return c >= 0 && c <= 9;}
+int notNull(char c){return c != 0;}
+
+// Unpack the reply string from a HTTP action and output the status code and data length
+int readHttpActionResult(const char* replyStr, int* statusCode, int* dataLength) {
+  char* c = (char*)replyStr;
+  int sc = 0; // status code
+  int dl = 0; // data length
+  bool inNum = false;
+
+  while (notNull(*c)){
+    int i = (int)(*c - '0');
+    c++;
+    if (isInt(i)){
+      if (!inNum){
+        inNum = true;
+        sc = dl;
+        dl = 0;
+      }
+      dl = (dl*10)+i;
+    } else {
+      inNum = false;
+    }
+  }
+
+  *statusCode = sc;
+  *dataLength = dl;
+
+  return true;
+}
+
 void setup() {
   // Connect to USB serial port if available
   Serial.begin(USB_BAUD);
@@ -171,25 +232,6 @@ void setup() {
   if (reply==false) {Serial.println(F("** Failed to connect to the modem! Check the baud and try again.**"));return;}
   Serial.println(F("Modem is active and ready"));
 
-  atWait();
-  reply = sendCommand("AT+CGATT?");
-  if (reply==false) {Serial.println(F("Failed to read packet domain attach or detach status"));return;}
-
-
-  atWait();
-  reply = sendCommand("AT+CGACT=1,1"); // try to attach cid 1? (Page 100)
-  if (reply==false) {Serial.println(F("Failed to attach to PDP context"));return;}
-  
-  // This gives me a failure. Not sure why.
-  // Set the "hologram" APN
-  // This should be setting up a PDP? https://www.tutorialspoint.com/gprs/gprs_pdp_context.htm   https://en.wikipedia.org/wiki/GPRS_core_network
-  //reply = sendCommand("AT+CGDCONT=0,\"IP\",\"hologram\"\n"); // AT+CGDCONT: Define PDP context
-  //if (reply==false) {
-  //  sendCommand("AT+CEER\r"); // Get detailed error report. See pages 504, 171
-  //  Serial.println(F("Failed to set API"));
-  //  return;
-  //}
-
   // Start the SIMCOM HTTP(S) Service
   reply = sendCommand("AT+HTTPINIT");
   if (reply==false) {Serial.println(F("Failed to start HTTP service"));return;}
@@ -202,70 +244,42 @@ void setup() {
   reply = sendCommand("AT+HTTPPARA=\"ACCEPT\",\"*/*\"");
   if (reply==false) {Serial.println(F("Failed to set accept type"));return;}
 
+  int messageBytes = strlen(messageString);
+  if (messageBytes <= 0 || messageBytes > 1048576){ Serial.printf("Invalid outgoing data length: %d\r\n", messageBytes); return; }
+
   // Upload the body data to SIMCOM module
   // TODO: count the length of the string.
   // "AT+HTTPDATA=<size>,<time>" -> DOWNLOAD\n<WRITE DATA TO SIMCOM>\nOK
-  sendData("AT+HTTPDATA=52,10\r"); // bytes, time in seconds
+  sendDataF("AT+HTTPDATA=%d,10", messageBytes); // bytes, time in seconds
   tryReadModem(); // skip over "DOWNLOAD"
-  reply = sendCommand("T-SIM message number 2. Hello to you in server land!"); // once we've written enough data, SIMCOM should end the download session by sending "OK"
+  reply = sendCommand(messageString); // once we've written enough data, SIMCOM should end the download session by sending "OK"
   if (reply==false) {Serial.println(F("Failed to upload POST body"));return;}
 
   atWait();
 
   // Send the request. Note, there are 6xx and 7xx errors the SIMCOM can output. See the datasheet page 322
   // this returns status code and {<method>,<statuscode>,<datalen>}. Example, for a successful get request: +HTTPACTION: 0,200,104220
-  reply = sendCommand("AT+HTTPACTION=1"); // 0=GET;1=POST;2=HEAD;3=DELETE;4=PUT
-  if (reply==false) {Serial.println(F("Failed to upload POST body"));return;}
+  sendData("AT+HTTPACTION=1"); // 0=GET;1=POST;2=HEAD;3=DELETE;4=PUT
 
+  const char* replyStr = tryReadModem(); // +HTTPACTION: 1,200,68
+
+  if (replyStr == NULL) { Serial.println(F("Failed to upload POST body")); return; }
+  int statusCode = 0;
+  int dataLength = 0;
+  reply = readHttpActionResult(replyStr, &statusCode, &dataLength);
+  atWait();
+  if (reply==false) {Serial.println(F("Failed to read action result"));return;}
+
+  if (statusCode < 200 || statusCode > 299){Serial.printf("Non-success status code: %d\r\n", statusCode); return; }
+  if (dataLength <= 0 || dataLength > 1048576){ Serial.printf("Invalid data length: %d\r\n", dataLength); return; }
   atWait();
   Serial.println("###### SUCCESS! Check the server side to confirm message sent ######");
+  atWait();
+  Serial.println("###### Reading response message... ######");
 
-
-
-  // "AT+HTTPREAD?" -> +HTTPREAD: LEN,<len> \n OK
-  sendData("AT+HTTPREAD?\r"); // bytes, time in seconds
-  const char* replyStr = tryReadModem(); // +HTTPREAD: LEN,<len>\nOK
-
-  if (replyStr == NULL){
-    Serial.println("Failure while trying to read reply: reply string was null");
-    return;
-  } else {
-    Serial.print("This is the reply string: [\"");
-    Serial.print(replyStr);
-    Serial.println("\"] End of reply string.");
-  }
-  
-  char* offs = strstr(replyStr, "LEN,");
-  if (offs == NULL){
-    Serial.println("Failure while trying to read reply: did not find 'LEN,'");
-    return;
-  }
-
-  // quick test? TODO: better string handling
-  int ilen = 0;
-  offs+=4; // skip "LEN,"
-  Serial.print("[[");
-  for (int i=0; i < 3; i++){
-    char c = *offs;
-    if (c >= '0' && c <= '9'){
-      ilen *= 10;
-      ilen += (int)(c-'0');
-      Serial.print(c);
-    } else {
-      Serial.printf(" ended on '%c'", c);
-      break;
-    }
-    offs++;
-  }
-  Serial.print("]]");
-
-  if (ilen < 1){
-    Serial.println("Failed to read data length");
-    return;
-  }
 
   char* commandStr;
-  if(0 > asprintf(&commandStr, "AT+HTTPREAD=%d", ilen)) {
+  if(0 > asprintf(&commandStr, "AT+HTTPREAD=%d", dataLength)) {
     Serial.println("Failed to generate read command");
     return;
   }
@@ -276,6 +290,10 @@ void setup() {
   if (reply==false) {Serial.println(F("Failed to read body"));return;}
   free(commandStr);
   // Reply should be dumped in the console now...?
+
+  // Close the SIMCOM HTTP(S) Service
+  reply = sendCommand("AT+HTTPTERM");
+  if (reply==false) {Serial.println(F("Http client shut-down failed"));return;}
 }
 
 int i = 0;
