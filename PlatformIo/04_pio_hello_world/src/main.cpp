@@ -78,12 +78,10 @@ int sendCommand(const char* cmd) {
         String r = SerialAT.readString();
         Serial.print("> ");
         Serial.println(r);
-        delay(500);
         if (r.indexOf("OK") >= 0) {
           return true;
         }
         else if (r.indexOf("ERROR") >= 0){
-          //delete &r; // ???
           return false; // failed
         }
       }
@@ -92,6 +90,40 @@ int sendCommand(const char* cmd) {
   }
   delay(500);
   return false;
+}
+
+// Wait for a message to arrive on the AT interface
+int waitForMessage(const char* terminate, int waitPeriod){
+  int waited = 0;
+  String needle = String(terminate);
+  while (waited < waitPeriod){
+
+    if (SerialAT.available()) {
+        String r = SerialAT.readString();
+        Serial.print("> ");
+        Serial.println(r);
+        Serial.println("<");
+        if (r.indexOf(needle) >= 0) {
+          return true;
+        }
+      }
+
+    delay(250);
+    waited+=250;
+  }
+  return false;
+}
+
+void atMessagePump(){
+  while (true){
+    Serial.print(".");
+    if (SerialAT.available()) {
+        String r = SerialAT.readString();
+        Serial.print("> ");
+        Serial.println(r);
+    }
+    delay(250);
+  }
 }
 
 // Send an AT command to modem, with a variable numeric input
@@ -200,40 +232,9 @@ int readHttpActionResult(const char* replyStr, int* statusCode, int* dataLength)
   return true;
 }
 
-void setup() {
-  // Connect to USB serial port if available
-  Serial.begin(USB_BAUD);
-  delay(100);
-
-  // Output reset types
-  RESET_REASON core0 = rtc_get_reset_reason(0);
-  RESET_REASON core1 = rtc_get_reset_reason(1);
-  print_reset_reason(core0);
-  print_reset_reason(core1);
-
-  // if we woke up from deep sleep, don't do anything.
-  if (core0 == DEEPSLEEP_RESET || core1 == DEEPSLEEP_RESET){
-    Serial.println("Woke from deep-sleep. Not starting modem");
-    return; // jump to main loop, where we will re-enter deep sleep.
-  }
-
-  // Connect serial to the SIMCOM module
-  SerialAT.begin(115200, SERIAL_8N1, PIN_RX, PIN_TX);  // ESP32 <-> SIMCOM
-  delay(1000);
-
-  // turn the modem on
-  modemTurnOn();
-  //delay(1000);
-
-  // test with an 'AT' command
-  Serial.println(F("Testing Modem Response..."));
-  int reply = sendCommand("AT");
-  atWait();
-  if (reply==false) {Serial.println(F("** Failed to connect to the modem! Check the baud and try again.**"));return;}
-  Serial.println(F("Modem is active and ready"));
-
+void makeHttpCall() {
   // Start the SIMCOM HTTP(S) Service
-  reply = sendCommand("AT+HTTPINIT");
+  int reply = sendCommand("AT+HTTPINIT");
   if (reply==false) {Serial.println(F("Failed to start HTTP service"));return;}
 
   // Set parameters for a HTTP call
@@ -296,8 +297,146 @@ void setup() {
   if (reply==false) {Serial.println(F("Http client shut-down failed"));return;}
 }
 
+void setup() {
+  // Connect to USB serial port if available
+  Serial.begin(USB_BAUD);
+  delay(100);
+
+  // Output reset types
+  RESET_REASON core0 = rtc_get_reset_reason(0);
+  RESET_REASON core1 = rtc_get_reset_reason(1);
+  print_reset_reason(core0);
+  print_reset_reason(core1);
+
+  // if we woke up from deep sleep, don't do anything.
+  if (core0 == DEEPSLEEP_RESET || core1 == DEEPSLEEP_RESET){
+    Serial.println("Woke from deep-sleep. Not starting modem");
+    return; // jump to main loop, where we will re-enter deep sleep.
+  }
+
+  // Connect serial to the SIMCOM module
+  SerialAT.begin(115200, SERIAL_8N1, PIN_RX, PIN_TX);  // ESP32 <-> SIMCOM
+  delay(1000);
+
+  // turn the modem on
+  modemTurnOn();
+  //delay(1000);
+
+  // test with an 'AT' command
+  Serial.println(F("Testing Modem Response..."));
+  atWait();
+  int reply = sendCommand("AT");
+  if (reply==false) {Serial.println(F("** Failed to connect to the modem! Check the baud and try again.**"));return;}
+  Serial.println(F("Modem is active and ready"));
+
+  // Test one:
+  //makeHttpCall();
+
+  // Request CPU temperature reading
+  atWait();
+  reply = sendCommand("AT+CPMUTEMP");
+  if (reply==false) {Serial.println(F("Failed to read SIMCOM CPU temperature"));}
+
+  // Request supply voltage
+  atWait();
+  reply = sendCommand("AT+CBC");
+  if (reply==false) {Serial.println(F("Failed to read SIMCOM supply voltage"));}
+
+
+  // Turn on the GNSS (GPS, satellite navigation) module.
+  // This can take a while to turn on, so we have to wait for a return call
+  reply = sendCommand("AT+CGDRT=4,1"); // Set the direction of specified GPIO
+  if (reply==false) {Serial.println(F("Fail: GPS/GNSS prep 1")); return; }
+  delay(2000);
+  reply = sendCommand("AT+CGSETV=4,0"); // Set the value of specified GPIO
+  if (reply==false) {Serial.println(F("Fail: GPS/GNSS prep 2")); return; }
+  delay(2000);
+
+  // turn off power
+  reply = sendCommand("AT+CGNSSPWR=0");
+  if (reply==false) {Serial.println(F("Fail: GPS/GNSS prep ")); return; }
+  delay(2000);
+
+  // turn on power
+  reply = sendCommand("AT+CGNSSPWR=1");
+  if (reply==false) {Serial.println(F("Fail: GPS/GNSS prep 2")); return; }
+  delay(2000);
+  //reply = sendCommand("AT+CGNSSPWR=1,1");
+  //if (reply==false) {Serial.println(F("Fail: GPS/GNSS prep 3")); return; }
+
+  // wait for the ready signal
+  reply = waitForMessage("+CGNSSPWR: READY!", 12000);
+  if (reply==false) {Serial.println(F("GNSS module did not reply within wait period")); return; }
+  Serial.println(F("GNSS module is ready."));
+
+  delay(2000);
+  reply = sendCommand("AT+CGNSSMODE=3"); // Configure GNSS support mode: 1=GPS;2=BDS;3=GPS+BDS;4=GLONASS;5=GPS+GLONASS;6=BDS+GLONASS;7=GPS+BDS+GLONASS
+  if (reply==false) {Serial.println(F("Fail: GPS/GNSS prep 4")); return; }
+  delay(2000);
+  reply = sendCommand("AT+CGNSSNMEA=1,1,1,1,1,1,0,0"); // Configure NMEA sentence type
+  if (reply==false) {Serial.println(F("Fail: GPS/GNSS prep 5")); return; }
+  delay(2000);
+  reply = sendCommand("AT+CGPSNMEARATE=2"); // Set NMEA output rate: 1=1Hz; 2=2Hz; 4=4Hz; 5=5Hz; 10=10Hz;
+  if (reply==false) {Serial.println(F("Fail: GPS/GNSS prep 6")); return; }
+  delay(2000);
+
+  //reply = sendCommand("AT+CGNSSTST=1"); // Send data received from UART3 to NMEA port
+  //if (reply==false) {Serial.println(F("Fail: GPS/GNSS prep 7")); return; }
+
+  //reply = sendCommand("AT+CGPSCOLD"); // Cold start GPS system
+  //if (reply==false) {Serial.println(F("Fail: GPS/GNSS prep 7")); return; }
+  //Serial.println(F("Cold starting GPS"));
+
+  //atWait();
+  //Serial.println("switching port...");
+  //sendData("AT+CGNSSPORTSWITCH=0,1"); // is this killing my serial?
+
+/*
+From https://github.com/Xinyuan-LilyGO/T-A7670X/issues/25
+
+AT+CGDRT=4,1
+AT+CGSETV=4,0
+
+AT+CGNSSPWR=1
+
+Waiting to return >  +CGNSSPWR: READY! 
+Next send
+
+AT+CGNSSMODE=3
+AT+CGNSSNMEA=1,1,1,1,1,1,0,0
+AT+CGPSNMEARATE=2
+AT+CGNSSTST=1
+AT+CGNSSPORTSWITCH=0,1
+*/
+
+  reply = sendCommand("AT+CGNSSINFO=1");
+  if (reply==false) {Serial.println(F("GPS test mode failed")); return; }
+  delay(1000);
+
+
+  // Read the GNSS position
+  while (true) {
+    delay(2000);
+
+    reply = sendCommand("AT+CGNSSINFO");
+    if (reply==false) {Serial.println(F("Failed to read GNSS location")); }
+    else Serial.println(F("Check console for GNSS location. All commas and no numbers means no GNSS lock"));
+
+    delay(2000);
+
+    reply = sendCommand("AT+CGPSINFO");
+    if (reply==false) {Serial.println(F("Failed to read GPS location")); }
+    else Serial.println(F("Check console for GPS location. All commas and no numbers means no GPS lock"));
+  }
+
+  Serial.println("End of tests. Going to sleep.");
+}
+
+
+
 int i = 0;
 void loop() {
+  Serial.println("Powering off the SIMCOM unit");
   sendCommand("AT+CPOF"); // try to power-off the SIMCOM module.
   atWait();
 
