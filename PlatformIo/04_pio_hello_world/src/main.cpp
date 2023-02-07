@@ -413,7 +413,7 @@ AT+CGNSSPORTSWITCH=0,1
   if (reply==false) {Serial.println(F("GPS test mode failed")); return; }
   delay(1000);
 
-
+/*
   // Read the GNSS position
   while (true) {
     delay(2000);
@@ -429,14 +429,31 @@ AT+CGNSSPORTSWITCH=0,1
     else Serial.println(F("Check console for GPS location. All commas and no numbers means no GPS lock"));
   }
 
-  Serial.println("End of tests. Going to sleep.");
+  Serial.println("End of tests. Going to sleep.");*/
+  Serial.println("GPS should be starting. Going to loop waiting for location");
 }
 
 
 
 int i = 0;
 void loop() {
-  Serial.println("Powering off the SIMCOM unit");
+    i++;
+
+    Serial.printf("%d seconds\r\n",(i*4));
+  // Read the GNSS position
+    delay(2000);
+
+    int reply = sendCommand("AT+CGNSSINFO");
+    if (reply==false) {Serial.println(F("Failed to read GNSS location")); }
+    else Serial.println(F("Check console for GNSS location. All commas and no numbers means no GNSS lock"));
+
+    delay(2000);
+
+    reply = sendCommand("AT+CGPSINFO");
+    if (reply==false) {Serial.println(F("Failed to read GPS location")); }
+    else Serial.println(F("Check console for GPS location. All commas and no numbers means no GPS lock"));
+
+  /*Serial.println("Powering off the SIMCOM unit");
   sendCommand("AT+CPOF"); // try to power-off the SIMCOM module.
   atWait();
 
@@ -447,5 +464,5 @@ void loop() {
   delay(200);
   esp_deep_sleep_start(); // never returns. We will get reset with DEEPSLEEP_RESET
 
-  ESP.restart();
+  ESP.restart();*/
 }
