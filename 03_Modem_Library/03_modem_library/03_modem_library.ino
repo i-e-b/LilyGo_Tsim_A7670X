@@ -232,25 +232,47 @@ void setup() {
     Serial.println("\"] End of reply string.");
   }
   
-  String lengthStr = String(lengthStr);
-  if (lengthStr.indexOf("LEN") >= 0){
-    Serial.println("Reading response length");
-    int left = lengthStr.indexOf("LEN") + 4;
-    int right = lengthStr.indexOf("OK") - 2;
-    int replyLength = 0;
-    if (right < 0) {
-      replyLength = (int)lengthStr.substring(left).toInt();
-    } else {
-      replyLength = (int)lengthStr.substring(left, right).toInt();
-    }
-    Serial.printf("Decoded length = %d\n", replyLength);
-  } else {
+  char* offs = strstr(replyStr, "LEN,");
+  if (offs == NULL){
     Serial.println("Failure while trying to read reply: did not find 'LEN,'");
     return;
   }
 
+  // quick test?
+  int ilen = 0;
+  offs+=4; // skip "LEN,"
+  Serial.print("[[");
+  for (int i=0; i < 3; i++){
+    char c = *offs;
+    if (c >= '0' && c <= '9'){
+      ilen *= 10;
+      ilen += (int)(c-'0');
+      Serial.print(c);
+    } else {
+      Serial.printf(" ended on '%c'", c);
+      break;
+    }
+    offs++;
+  }
+  Serial.print("]]");
+
+  if (ilen < 1){
+    Serial.println("Failed to read data length");
+    return;
+  }
+
+  char* commandStr;
+  if(0 > asprintf(&commandStr, "AT+HTTPREAD=%d\r", ilen)) {
+    Serial.println("Failed to generate read command");
+    return;
+  }
+  Serial.println(&commandStr[0]);
 
   // "AT+HTTPREAD=<byte_size>" -> OK\n\n<data>\n+HTTPREAD: 0
+  reply = sendCommand(&commandStr[0]);
+  if (reply==false) {Serial.println(F("Failed to read body"));return;}
+  free(commandStr);
+  // Reply should be dumped in the console now...?
 }
 
 void loop() {
