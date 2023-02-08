@@ -9,6 +9,7 @@
         "fstream": "cpp",
         "iosfwd": "cpp",
         "new": "cpp",
-        "streambuf": "cpp"
+        "streambuf": "cpp",
+        "random": "cpp"
     }
 }

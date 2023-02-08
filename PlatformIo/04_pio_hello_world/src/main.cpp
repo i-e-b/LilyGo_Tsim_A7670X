@@ -104,26 +104,17 @@ int waitForMessage(const char* terminate, int waitPeriod){
         Serial.println(r);
         Serial.println("<");
         if (r.indexOf(needle) >= 0) {
+          Serial.printf("Found message '%s'; Continuing!\r\n", terminate);
           return true;
         }
       }
 
+    Serial.print(".");
     delay(250);
     waited+=250;
   }
+  Serial.printf("Did not see message '%s'\r\n", terminate);
   return false;
-}
-
-void atMessagePump(){
-  while (true){
-    Serial.print(".");
-    if (SerialAT.available()) {
-        String r = SerialAT.readString();
-        Serial.print("> ");
-        Serial.println(r);
-    }
-    delay(250);
-  }
 }
 
 // Send an AT command to modem, with a variable numeric input
@@ -174,8 +165,16 @@ const char* tryReadModem() {
   return NULL;
 }
 
+// Send an 'AT' command to the SIMCOM module,
+// and return any result as a string
+const char* readCommand(const char* cmd){
+  sendData(cmd);
+  return tryReadModem();
+}
+
 // Enable, power-up and reset the modem
-void modemTurnOn() {
+// The modem is ready if this function returns 'true'
+int modemTurnOn() {
   Serial.println(F("Resetting Modem...\r\n"));
 
   // Set the A7670 enable line (?)
@@ -190,7 +189,7 @@ void modemTurnOn() {
   delay(3000);
   digitalWrite(RESET, LOW);
 
-  // Cycle modem power (?)
+  // Cycle modem power
   pinMode(MODEM_POWER, OUTPUT);
   digitalWrite(MODEM_POWER, LOW);
   delay(100);
@@ -199,10 +198,36 @@ void modemTurnOn() {
   digitalWrite(MODEM_POWER, LOW);
 
   Serial.println(F("Modem power-up starting\r\n"));
+  delay(5000); // give it a while to boot
+
+
+  int reply = waitForMessage("PB DONE", 12000);
+  if (reply==false){
+    Serial.println(F("** DID NOT SEE PB DONE message **"));
+  }
+
+  // test with an 'AT' command
+  Serial.println(F("Testing Modem Response..."));
+  reply = sendCommand("AT");
+
+  if (reply == false) {
+    Serial.println(F("** Failed to connect to the modem! Check the baud and try again.**"));
+    return false;
+  }
+
+  Serial.println(F("Modem is active and ready"));
+  return true;
 }
 
-int isInt(int c){return c >= 0 && c <= 9;}
-int notNull(char c){return c != 0;}
+// Send a power-off command to the SIMCOM modem
+void modemTurnOff(){
+  Serial.println("Powering off the SIMCOM unit");
+  sendCommand("AT+CPOF"); // try to power-off the SIMCOM module.
+  atWait();
+}
+
+#define isInt(c) (c >= 0 && c <= 9)
+#define notNull(c) (c != 0)
 
 // Unpack the reply string from a HTTP action and output the status code and data length
 int readHttpActionResult(const char* replyStr, int* statusCode, int* dataLength) {
@@ -297,6 +322,129 @@ void makeHttpCall() {
   if (reply==false) {Serial.println(F("Http client shut-down failed"));return;}
 }
 
+// Read a string, populating an array of ints with each number found.
+// Return count of numbers found, or zero in case of errors
+// If maxCount is exceeded, the first numbers found are bumped off the back of the list
+// so this will return the last maxCount numbers found.
+int readNumberSet(const char* src, int maxCount, int* target){
+  char* c = (char*)src; // current character
+  int idx = 0; // output index
+  int tmp = 0; // number being read
+  bool inNum = false;
+
+  while (notNull(*c)){
+    int i = (int)(*c - '0');
+    c++;
+    if (isInt(i)){
+      if (!inNum){ // starting a new number
+        inNum = true;
+        tmp = 0;
+      }
+      tmp = (tmp*10)+i;
+    } else {
+      if (inNum){ // tmp is complete, write to output
+        if (idx >= maxCount){ // push everything back
+          for (int i=1; i < maxCount; i++) target[i-1] = target[i];
+          idx = maxCount - 1;
+        }
+        target[idx] = tmp;
+        idx++;
+      }
+      inNum = false;
+    }
+  }
+
+  if (inNum){ // finish last number
+    if (idx >= maxCount) { // push everything back
+      for (int i = 1; i < maxCount; i++) target[i - 1] = target[i];
+      idx = maxCount - 1;
+    }
+    target[idx] = tmp;
+    idx++;
+  }
+
+  return idx;
+}
+
+// Alternate test of GPS wake up
+// Uses a different set of AT commands.
+int activateGPS_2(){
+
+  delay(5000);
+
+  // turn on power
+  int reply = sendCommand("AT+CGNSSPWR=1");
+  if (reply==false) {Serial.println(F("Fail: GPS/GNSS power on")); return false; }
+  delay(2000);
+
+  // wait for the ready signal
+  reply = waitForMessage("+CGNSSPWR: READY!", 12000);
+  if (reply==false) {Serial.println(F("GNSS module did not reply within wait period")); return false; }
+  Serial.println(F("GNSS module is powered on"));
+
+  //delay(2000);
+  //reply = sendCommand("AT+CGPSCOLD");
+  //if (reply==false) {Serial.println(F("Fail: GPS/GNSS cold start")); return false; }
+
+  delay(2000);
+  reply = sendCommand("AT+CGNSSINFO=5");
+  if (reply==false) {Serial.println(F("Fail: GPS/GNSS cold start")); return false; }
+
+  delay(2000);
+  return true;
+}
+
+// Turn on and configure the GPS/GNSS system
+// It will take at least 130 seconds to get a fix.
+// Poll AT+CGPSINFO or AT+CGNSSINFO until you get a valid result.
+// Calls to the xINFO commands may fail even after a lock is acheived,
+// so make sure you have error detection in place
+int activateGPS() {
+  // Turn on the GNSS (GPS, satellite navigation) module.
+  // This can take a while to turn on, so we have to wait for a return call
+  int reply = sendCommand("AT+CGDRT=4,1"); // Set the direction of specified GPIO
+  if (reply==false) {Serial.println(F("Fail: GPS/GNSS prep 1")); return false; }
+  delay(2000);
+  reply = sendCommand("AT+CGSETV=4,0"); // Set the value of specified GPIO
+  if (reply==false) {Serial.println(F("Fail: GPS/GNSS prep 2")); return false; }
+  delay(2000);
+
+  // turn off power
+  reply = sendCommand("AT+CGNSSPWR=0");
+  if (reply==false) {Serial.println(F("Fail: GPS/GNSS prep ")); return false; }
+  delay(2000);
+
+  // turn on power
+  reply = sendCommand("AT+CGNSSPWR=1");
+  if (reply==false) {Serial.println(F("Fail: GPS/GNSS prep 2")); return false; }
+  delay(2000);
+
+  // wait for the ready signal
+  reply = waitForMessage("+CGNSSPWR: READY!", 12000);
+  if (reply==false) {Serial.println(F("GNSS module did not reply within wait period")); return false; }
+  Serial.println(F("GNSS module is ready."));
+
+  delay(2000);
+  reply = sendCommand("AT+CGNSSMODE=3"); // Configure GNSS support mode: 1=GPS;2=BDS;3=GPS+BDS;4=GLONASS;5=GPS+GLONASS;6=BDS+GLONASS;7=GPS+BDS+GLONASS
+  if (reply==false) {Serial.println(F("Fail: GPS/GNSS prep 4")); return false; }
+  delay(2000);
+  reply = sendCommand("AT+CGNSSNMEA=1,1,1,1,1,1,0,0"); // Configure NMEA sentence type
+  if (reply==false) {Serial.println(F("Fail: GPS/GNSS prep 5")); return false; }
+  delay(2000);
+  reply = sendCommand("AT+CGPSNMEARATE=2"); // Set NMEA output rate: 1=1Hz; 2=2Hz; 4=4Hz; 5=5Hz; 10=10Hz;
+  if (reply==false) {Serial.println(F("Fail: GPS/GNSS prep 6")); return false; }
+  delay(2000);
+
+  reply = sendCommand("AT+CGNSSINFO=1");
+  if (reply==false) {Serial.println(F("GPS test mode failed")); return false; }
+  delay(1000);
+
+  Serial.println("GPS should be starting. Going to loop waiting for location");
+  return true;
+}
+
+int alive = false;
+
 void setup() {
   // Connect to USB serial port if available
   Serial.begin(USB_BAUD);
@@ -319,18 +467,16 @@ void setup() {
   delay(1000);
 
   // turn the modem on
-  modemTurnOn();
-  //delay(1000);
-
-  // test with an 'AT' command
-  Serial.println(F("Testing Modem Response..."));
-  atWait();
-  int reply = sendCommand("AT");
-  if (reply==false) {Serial.println(F("** Failed to connect to the modem! Check the baud and try again.**"));return;}
-  Serial.println(F("Modem is active and ready"));
+  int reply = modemTurnOn();
+  if (reply == false) {Serial.println(F("Failed to start SIMCOM modem")); return; }
+  delay(1000);
 
   // Test one:
   //makeHttpCall();
+
+  // Wake up the GPS system. It takes ages when it works at all.
+  reply = activateGPS_2();
+  if (reply == false) {Serial.println(F("Failed to start GPS sub-system. Reboot modem")); return; }
 
   // Request CPU temperature reading
   atWait();
@@ -342,121 +488,65 @@ void setup() {
   reply = sendCommand("AT+CBC");
   if (reply==false) {Serial.println(F("Failed to read SIMCOM supply voltage"));}
 
-
-  // Turn on the GNSS (GPS, satellite navigation) module.
-  // This can take a while to turn on, so we have to wait for a return call
-  reply = sendCommand("AT+CGDRT=4,1"); // Set the direction of specified GPIO
-  if (reply==false) {Serial.println(F("Fail: GPS/GNSS prep 1")); return; }
-  delay(2000);
-  reply = sendCommand("AT+CGSETV=4,0"); // Set the value of specified GPIO
-  if (reply==false) {Serial.println(F("Fail: GPS/GNSS prep 2")); return; }
-  delay(2000);
-
-  // turn off power
-  reply = sendCommand("AT+CGNSSPWR=0");
-  if (reply==false) {Serial.println(F("Fail: GPS/GNSS prep ")); return; }
-  delay(2000);
-
-  // turn on power
-  reply = sendCommand("AT+CGNSSPWR=1");
-  if (reply==false) {Serial.println(F("Fail: GPS/GNSS prep 2")); return; }
-  delay(2000);
-  //reply = sendCommand("AT+CGNSSPWR=1,1");
-  //if (reply==false) {Serial.println(F("Fail: GPS/GNSS prep 3")); return; }
-
-  // wait for the ready signal
-  reply = waitForMessage("+CGNSSPWR: READY!", 12000);
-  if (reply==false) {Serial.println(F("GNSS module did not reply within wait period")); return; }
-  Serial.println(F("GNSS module is ready."));
-
-  delay(2000);
-  reply = sendCommand("AT+CGNSSMODE=3"); // Configure GNSS support mode: 1=GPS;2=BDS;3=GPS+BDS;4=GLONASS;5=GPS+GLONASS;6=BDS+GLONASS;7=GPS+BDS+GLONASS
-  if (reply==false) {Serial.println(F("Fail: GPS/GNSS prep 4")); return; }
-  delay(2000);
-  reply = sendCommand("AT+CGNSSNMEA=1,1,1,1,1,1,0,0"); // Configure NMEA sentence type
-  if (reply==false) {Serial.println(F("Fail: GPS/GNSS prep 5")); return; }
-  delay(2000);
-  reply = sendCommand("AT+CGPSNMEARATE=2"); // Set NMEA output rate: 1=1Hz; 2=2Hz; 4=4Hz; 5=5Hz; 10=10Hz;
-  if (reply==false) {Serial.println(F("Fail: GPS/GNSS prep 6")); return; }
-  delay(2000);
-
-  //reply = sendCommand("AT+CGNSSTST=1"); // Send data received from UART3 to NMEA port
-  //if (reply==false) {Serial.println(F("Fail: GPS/GNSS prep 7")); return; }
-
-  //reply = sendCommand("AT+CGPSCOLD"); // Cold start GPS system
-  //if (reply==false) {Serial.println(F("Fail: GPS/GNSS prep 7")); return; }
-  //Serial.println(F("Cold starting GPS"));
-
-  //atWait();
-  //Serial.println("switching port...");
-  //sendData("AT+CGNSSPORTSWITCH=0,1"); // is this killing my serial?
-
-/*
-From https://github.com/Xinyuan-LilyGO/T-A7670X/issues/25
-
-AT+CGDRT=4,1
-AT+CGSETV=4,0
-
-AT+CGNSSPWR=1
-
-Waiting to return >  +CGNSSPWR: READY! 
-Next send
-
-AT+CGNSSMODE=3
-AT+CGNSSNMEA=1,1,1,1,1,1,0,0
-AT+CGPSNMEARATE=2
-AT+CGNSSTST=1
-AT+CGNSSPORTSWITCH=0,1
-*/
-
-  reply = sendCommand("AT+CGNSSINFO=1");
-  if (reply==false) {Serial.println(F("GPS test mode failed")); return; }
-  delay(1000);
-
-/*
-  // Read the GNSS position
-  while (true) {
-    delay(2000);
-
-    reply = sendCommand("AT+CGNSSINFO");
-    if (reply==false) {Serial.println(F("Failed to read GNSS location")); }
-    else Serial.println(F("Check console for GNSS location. All commas and no numbers means no GNSS lock"));
-
-    delay(2000);
-
-    reply = sendCommand("AT+CGPSINFO");
-    if (reply==false) {Serial.println(F("Failed to read GPS location")); }
-    else Serial.println(F("Check console for GPS location. All commas and no numbers means no GPS lock"));
-  }
-
-  Serial.println("End of tests. Going to sleep.");*/
-  Serial.println("GPS should be starting. Going to loop waiting for location");
+  alive = true;
 }
 
-
-
 int i = 0;
-void loop() {
-    i++;
+int gotLock = false;
+int gpsData[40]; // really, we get up to 16 data points, but might read those as two ints
 
-    Serial.printf("%d seconds\r\n",(i*4));
+void loop() {
+    if (!alive){
+      Serial.println("System did not start correctly. Will reset NOW.");
+      delay(500);
+      ESP.restart();
+      return;
+    }
+
+    atWait();
+    i++;
+    Serial.printf("%d seconds\r\n",((i-1)*4));
+
+
+    if (!gotLock && i > 100) { // try cycling the GPS unit again
+      i = 0;
+      Serial.println("Restarting GPS");
+      activateGPS_2();
+      return;
+    }
+
   // Read the GNSS position
     delay(2000);
 
-    int reply = sendCommand("AT+CGNSSINFO");
-    if (reply==false) {Serial.println(F("Failed to read GNSS location")); }
-    else Serial.println(F("Check console for GNSS location. All commas and no numbers means no GNSS lock"));
+    const char* gnss = readCommand("AT+CGNSSINFO");
+    if (gnss==NULL) {Serial.println(F("Failed to read GNSS location")); }
+    else {
+      //Serial.println(F("Check console for GNSS location. All commas and no numbers means no GNSS lock"));
+      int got = readNumberSet(gnss, 36, gpsData); // NOTE: this reads 12.34 as two integers: 12, and 34
+      if (got < 1){
+        Serial.println(F("No GNSS data"));
+      } else {
+        Serial.printf("Found %d datapoints in GNSS", got);
+      }
+      //free((void*)gnss);
+    }
 
     delay(2000);
 
-    reply = sendCommand("AT+CGPSINFO");
-    if (reply==false) {Serial.println(F("Failed to read GPS location")); }
-    else Serial.println(F("Check console for GPS location. All commas and no numbers means no GPS lock"));
+    const char* gps = readCommand("AT+CGPSINFO");
+    if (gnss==NULL) {Serial.println(F("Failed to read GPS location")); }
+    else {
+      //Serial.println(F("Check console for GNSS location. All commas and no numbers means no GNSS lock"));
+      int got = readNumberSet(gnss, 36, gpsData); // NOTE: this reads 12.34 as two integers: 12, and 34
+      if (got < 1){
+        Serial.println(F("No GPS data"));
+      } else {
+        Serial.printf("Found %d datapoints in GPS", got);
+      }
+      //free((void*)gnss);
+    }
 
-  /*Serial.println("Powering off the SIMCOM unit");
-  sendCommand("AT+CPOF"); // try to power-off the SIMCOM module.
-  atWait();
-
+  /*
   // Test is complete Set ESP32 to sleep mode
   Serial.print("Z");
   esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S);
