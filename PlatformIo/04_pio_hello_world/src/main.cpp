@@ -59,7 +59,7 @@ void print_reset_reason(RESET_REASON reason){
 
 // Tunable delay between AT commands
 void atWait(){
-  delay(250);
+  delay(500);
 }
 
 // Send an 'AT' command to the SIMCOM module.
@@ -208,13 +208,36 @@ int modemTurnOn() {
 
   // test with an 'AT' command
   Serial.println(F("Testing Modem Response..."));
-  reply = sendCommand("AT");
+  reply = sendCommand("ATZ"); // Load user settings
 
   if (reply == false) {
     Serial.println(F("** Failed to connect to the modem! Check the baud and try again.**"));
     return false;
   }
+  atWait();
 
+  reply = sendCommand("AT+CTZU=1"); // Enable updating internal clock from NITZ
+  if (reply == true) {
+    reply = sendCommand("AT&W"); // store settings
+    if (reply == true){
+      Serial.println("Wrote NITZ setting");
+
+
+      /* Note, we can do this to force off the network and pick up the date change
+      AT+COPS=2
+      > OK
+      AT+CTZU=1
+      > OK
+      AT+COPS=0
+      > OK
+      +CTZU: "15/05/06,17:25:42",-12,0
+      */
+    }
+  }
+
+  atWait();
+  sendCommand("AT+CCLK?"); // get clock setting from modem
+  atWait();
   Serial.println(F("Modem is active and ready"));
   return true;
 }
@@ -382,24 +405,20 @@ int activateGPS_2(){
   if (reply==false) {Serial.println(F("GNSS module did not reply within wait period")); return false; }
   Serial.println(F("GNSS module is powered on"));
 
-  //delay(2000);
-  //reply = sendCommand("AT+CGPSCOLD");
-  //if (reply==false) {Serial.println(F("Fail: GPS/GNSS cold start")); return false; }
-
   delay(2000);
-  reply = sendCommand("AT+CGNSSINFO=5");
-  if (reply==false) {Serial.println(F("Fail: GPS/GNSS cold start")); return false; }
+  reply = sendCommand("AT+CGNSSTST=1"); // Send data from UART3 to NMEA ... ?
+  if (reply==false) {Serial.println(F("Fail: send data received from UART3 to NMEA port")); return false; }
 
   delay(2000);
   return true;
 }
 
 // Turn on and configure the GPS/GNSS system
-// It will take at least 130 seconds to get a fix.
+// It will take AT LEAST 130 seconds to get a fix.
 // Poll AT+CGPSINFO or AT+CGNSSINFO until you get a valid result.
 // Calls to the xINFO commands may fail even after a lock is acheived,
 // so make sure you have error detection in place
-int activateGPS() {
+int activateGPS_1() {
   // Turn on the GNSS (GPS, satellite navigation) module.
   // This can take a while to turn on, so we have to wait for a return call
   int reply = sendCommand("AT+CGDRT=4,1"); // Set the direction of specified GPIO
@@ -494,6 +513,7 @@ void setup() {
 int i = 0;
 int gotLock = false;
 int gpsData[40]; // really, we get up to 16 data points, but might read those as two ints
+int firstLockMin, firstLockSec;
 
 void loop() {
     if (!alive){
@@ -505,15 +525,10 @@ void loop() {
 
     atWait();
     i++;
-    Serial.printf("%d seconds\r\n",((i-1)*4));
-
-
-    if (!gotLock && i > 100) { // try cycling the GPS unit again
-      i = 0;
-      Serial.println("Restarting GPS");
-      activateGPS_2();
-      return;
-    }
+    int mins = (i*4) / 60;
+    int secs = (i*4) % 60;
+    Serial.printf("Time since GPS power-up = %d:%02d\r\n",mins,secs);
+    if (gotLock){Serial.printf("First lock after = %d:%02d\r\n",firstLockMin,firstLockSec);}
 
   // Read the GNSS position
     delay(2000);
@@ -521,30 +536,82 @@ void loop() {
     const char* gnss = readCommand("AT+CGNSSINFO");
     if (gnss==NULL) {Serial.println(F("Failed to read GNSS location")); }
     else {
-      //Serial.println(F("Check console for GNSS location. All commas and no numbers means no GNSS lock"));
       int got = readNumberSet(gnss, 36, gpsData); // NOTE: this reads 12.34 as two integers: 12, and 34
       if (got < 1){
+        gotLock = false;
         Serial.println(F("No GNSS data"));
       } else {
-        Serial.printf("Found %d datapoints in GNSS", got);
+        Serial.printf("Found %d datapoints in GNSS: ", got);
+        for (int j = 0; j < got && j < 40; j++){
+          Serial.printf("%d, ", gpsData[j]);
+        }
+
+        long lat_a = gpsData[4];
+        long lat_b = gpsData[5];
+        long lon_a = gpsData[6];
+        long lon_b = gpsData[7];
+
+        long lat_deg = lat_a / 100;
+        long lon_deg = lon_a / 100;
+
+        lat_b += (lat_a % 100) * 100000;
+        lon_b += (lon_a % 100) * 100000;
+        lat_b /= 60;
+        lon_b /= 60;
+
+        lon_deg = -lon_deg; // TODO: detect W or E. Do the inversion for W only.
+
+        Serial.printf("\r\nGNSS:  https://www.openstreetmap.org/#map=19/%d.%05d/%d.%05d", lat_deg, lat_b, lon_deg, lon_b);// not correct, due to leading zeros
+
+        Serial.println();
+        if (!gotLock){firstLockMin=mins; firstLockSec=secs;}
+        gotLock = true;
       }
-      //free((void*)gnss);
     }
 
-    delay(2000);
+    delay(1000);
 
     const char* gps = readCommand("AT+CGPSINFO");
     if (gnss==NULL) {Serial.println(F("Failed to read GPS location")); }
     else {
-      //Serial.println(F("Check console for GNSS location. All commas and no numbers means no GNSS lock"));
-      int got = readNumberSet(gnss, 36, gpsData); // NOTE: this reads 12.34 as two integers: 12, and 34
+      int got = readNumberSet(gps, 36, gpsData); // NOTE: this reads 12.34 as two integers: 12, and 34
       if (got < 1){
+        gotLock = false;
         Serial.println(F("No GPS data"));
       } else {
-        Serial.printf("Found %d datapoints in GPS", got);
+        Serial.printf("Found %d datapoints in GPS: ", got);
+        for (int j = 0; j < got && j < 40; j++){
+          Serial.printf("%d, ", gpsData[j]);
+        }
+
+
+        long lat_a = gpsData[0];
+        long lat_b = gpsData[1];
+        long lon_a = gpsData[2];
+        long lon_b = gpsData[3];
+
+        long date = gpsData[4];
+        long time = gpsData[5];
+
+        long lat_deg = lat_a / 100;
+        long lon_deg = lon_a / 100;
+
+        lat_b += (lat_a % 100) * 100000;
+        lon_b += (lon_a % 100) * 100000;
+        lat_b /= 60;
+        lon_b /= 60;
+
+        lon_deg = -lon_deg; // TODO: detect W or E. Do the inversion for W only.
+
+        Serial.printf("\r\nGPS:  https://www.openstreetmap.org/#map=19/%d.%05d/%d.%05d", lat_deg, lat_b, lon_deg, lon_b);// not correct, due to leading zeros
+
+        Serial.println();
+        if (!gotLock){firstLockMin=mins; firstLockSec=secs;}
+        gotLock = true;
       }
-      //free((void*)gnss);
     }
+
+    delay(1000);
 
   /*
   // Test is complete Set ESP32 to sleep mode
