@@ -280,7 +280,7 @@ int readHttpActionResult(const char* replyStr, int* statusCode, int* dataLength)
   return true;
 }
 
-void makeHttpCall() {
+void makeHttpCall(char* message) {
   // Start the SIMCOM HTTP(S) Service
   int reply = sendCommand("AT+HTTPINIT");
   if (reply==false) {Serial.println(F("Failed to start HTTP service"));return;}
@@ -293,7 +293,7 @@ void makeHttpCall() {
   reply = sendCommand("AT+HTTPPARA=\"ACCEPT\",\"*/*\"");
   if (reply==false) {Serial.println(F("Failed to set accept type"));return;}
 
-  int messageBytes = strlen(messageString);
+  int messageBytes = strlen(message);
   if (messageBytes <= 0 || messageBytes > 1048576){ Serial.printf("Invalid outgoing data length: %d\r\n", messageBytes); return; }
 
   // Upload the body data to SIMCOM module
@@ -301,7 +301,7 @@ void makeHttpCall() {
   // "AT+HTTPDATA=<size>,<time>" -> DOWNLOAD\n<WRITE DATA TO SIMCOM>\nOK
   sendDataF("AT+HTTPDATA=%d,10", messageBytes); // bytes, time in seconds
   tryReadModem(); // skip over "DOWNLOAD"
-  reply = sendCommand(messageString); // once we've written enough data, SIMCOM should end the download session by sending "OK"
+  reply = sendCommand(message); // once we've written enough data, SIMCOM should end the download session by sending "OK"
   if (reply==false) {Serial.println(F("Failed to upload POST body"));return;}
 
   atWait();
@@ -513,7 +513,7 @@ void setup() {
 int i = 0;
 int gotLock = false;
 int gpsData[40]; // really, we get up to 16 data points, but might read those as two ints
-int firstLockMin, firstLockSec;
+int firstLockMin=0, firstLockSec=0;
 
 void loop() {
     if (!alive){
@@ -526,13 +526,15 @@ void loop() {
     atWait();
     i++;
     int mins = (i*4) / 60;
+    int hrs  = mins / 60;
+    mins = mins % 60;
     int secs = (i*4) % 60;
-    Serial.printf("Time since GPS power-up = %d:%02d\r\n",mins,secs);
+    Serial.printf("Time since GPS power-up = %02d:%02d:%02d\r\n",hrs, mins,secs);
     if (gotLock){Serial.printf("First lock after = %d:%02d\r\n",firstLockMin,firstLockSec);}
 
-  // Read the GNSS position
     delay(2000);
-
+  // Read the GNSS position
+/*
     const char* gnss = readCommand("AT+CGNSSINFO");
     if (gnss==NULL) {Serial.println(F("Failed to read GNSS location")); }
     else {
@@ -568,11 +570,11 @@ void loop() {
         gotLock = true;
       }
     }
-
+*/
     delay(1000);
 
     const char* gps = readCommand("AT+CGPSINFO");
-    if (gnss==NULL) {Serial.println(F("Failed to read GPS location")); }
+    if (gps==NULL) {Serial.println(F("Failed to read GPS location")); }
     else {
       int got = readNumberSet(gps, 36, gpsData); // NOTE: this reads 12.34 as two integers: 12, and 34
       if (got < 1){
@@ -590,8 +592,20 @@ void loop() {
         long lon_a = gpsData[2];
         long lon_b = gpsData[3];
 
-        long date = gpsData[4];
-        long time = gpsData[5];
+        long date = gpsData[4];  // like 080223
+        long time = gpsData[5];  // like 150151
+
+        long hours24 = time / 10000;
+        long minutes = (time / 100) % 100;
+        long seconds = time % 100;
+
+        long year = (date % 100); // 00..99
+        long month= (date / 100) % 100;
+        long day  = (date / 10000) % 100;
+
+        // Set time like this: `AT+CCLK="14/01/01,02:14:36+08"`
+        // Format is "yy/MM/dd,hh:mm:ss±zz", no optional parts
+
 
         long lat_deg = lat_a / 100;
         long lon_deg = lon_a / 100;
@@ -601,12 +615,25 @@ void loop() {
         lat_b /= 60;
         lon_b /= 60;
 
-        lon_deg = -lon_deg; // TODO: detect W or E. Do the inversion for W only.
+        lon_deg = -lon_deg; // TODO: detect W or E. Do the inversion for W only?
 
-        Serial.printf("\r\nGPS:  https://www.openstreetmap.org/#map=19/%d.%05d/%d.%05d", lat_deg, lat_b, lon_deg, lon_b);// not correct, due to leading zeros
+        Serial.printf("\r\nGPS:  https://www.openstreetmap.org/#map=19/%d.%05d/%d.%05d", lat_deg, lat_b, lon_deg, lon_b);
 
         Serial.println();
-        if (!gotLock){firstLockMin=mins; firstLockSec=secs;}
+        if (!gotLock){
+          firstLockMin=mins; firstLockSec=secs;
+          // Send our acquisition to remote server
+          char *httpMsgStr;
+          // Found 11 datapoints in GPS: 5149, 48561, 301, 87739, 80223, 125658, 0, 114, 0, 0, 579, 
+          if (0 > asprintf(&httpMsgStr, "T-SIM got a GPS lock. Time=%02d:%02d:%02d; Date=20%02d-%02d-%02d; Location=https://www.openstreetmap.org/#map=19/%d.%05d/%d.%05d",
+                          hours24, minutes, seconds, year, month, day, lat_deg, lat_b, lon_deg, lon_b)) {
+            Serial.println("Failed to generate HTTP message");
+          } else {
+            Serial.println(&httpMsgStr[0]);
+            makeHttpCall(httpMsgStr);
+          }
+          free(httpMsgStr);
+        }
         gotLock = true;
       }
     }
