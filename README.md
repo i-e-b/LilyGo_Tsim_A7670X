@@ -22,6 +22,20 @@ You should get the message:
 Your device is activated and ready for use on our network. We have not yet seen it connect to a local tower or pass data.
 ```
 
+## OTA of the ESP32
+
+See these resources:
+
+* https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/system/ota.html
+* https://github.com/ayushsharma82/AsyncElegantOTA
+* https://lastminuteengineers.com/esp32-ota-updates-arduino-ide/
+* https://microcontrollerslab.com/esp32-ota-over-the-air-updates-asyncelegantota-library-arduino/
+
+## Useful ESP32 documentation points
+
+* Deep wake stubs - code to run immediately on wake: https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-guides/deep-sleep-stub.html
+
+
 # Arduino setup
 
 Manufacturer's instructions are at: https://github.com/Xinyuan-LilyGO/T-A7670X

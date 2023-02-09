@@ -4,6 +4,10 @@
 // Basic Arduino stuff (Long-term TODO: remove this and do the low level stuff ourself)
 #include <Arduino.h>
 
+// System time get/set (ESP32 RTC)
+#include "time.h"
+#include <sys/time.h>
+
 // Message we will send to the server
 const char* messageString = "This is a message from the T-SIM micro-controller. It is 🤓 Awesome !";
 
@@ -158,7 +162,20 @@ const char* tryReadModem() {
     if (SerialAT.available()) {
       String r = SerialAT.readString();
       Serial.print("> ");
-      Serial.println(r);
+      Serial.print(r); // commands end in newlines
+      return r.c_str();
+    }
+  }
+  return NULL;
+}
+
+// Try to read data coming from the modem.
+// Anything read will be output to serial
+const char* tryReadModemQuiet() {
+  for (int j = 0; j < 5; j++) {  // wait for reply
+    delay(500);
+    if (SerialAT.available()) {
+      String r = SerialAT.readString();
       return r.c_str();
     }
   }
@@ -170,6 +187,14 @@ const char* tryReadModem() {
 const char* readCommand(const char* cmd){
   sendData(cmd);
   return tryReadModem();
+}
+
+// Send an 'AT' command to the SIMCOM module,
+// and return any result as a string.
+// This version does not echo results.
+const char* readCommandQuiet(const char* cmd){
+  sendData(cmd);
+  return tryReadModemQuiet();
 }
 
 // Enable, power-up and reset the modem
@@ -216,6 +241,7 @@ int modemTurnOn() {
   }
   atWait();
 
+/* // This doesn't seem to be effective.
   reply = sendCommand("AT+CTZU=1"); // Enable updating internal clock from NITZ
   if (reply == true) {
     reply = sendCommand("AT&W"); // store settings
@@ -223,17 +249,18 @@ int modemTurnOn() {
       Serial.println("Wrote NITZ setting");
 
 
-      /* Note, we can do this to force off the network and pick up the date change
-      AT+COPS=2
-      > OK
-      AT+CTZU=1
-      > OK
-      AT+COPS=0
-      > OK
-      +CTZU: "15/05/06,17:25:42",-12,0
-      */
+      // Note, we can do this to force off the network and pick up the date change
+      //AT+COPS=2
+      //> OK
+      //AT+CTZU=1
+      //> OK
+      //AT+COPS=0
+      //> OK
+      //+CTZU: "15/05/06,17:25:42",-12,0
+      //
     }
   }
+*/
 
   atWait();
   sendCommand("AT+CCLK?"); // get clock setting from modem
@@ -389,9 +416,15 @@ int readNumberSet(const char* src, int maxCount, int* target){
   return idx;
 }
 
-// Alternate test of GPS wake up
-// Uses a different set of AT commands.
-int activateGPS_2(){
+
+// Turn on and configure the GPS/GNSS system
+// It will take around 4 minutes to get a fix if you have attained a fix in the last 4 hours or so
+// If you have not got a lock in over 4 hours, it might take 10 minutes to get a fix (ephemeris tables need to be copied from satellite data)
+// You can configure the SIMCOM to read ephemeris tables from the network to speed up fixing, and a cost of data use. This is not done here.
+// Poll AT+CGPSINFO or AT+CGNSSINFO until you get a valid result.
+// Calls to the xINFO commands may fail even after a lock is acheived,
+// so make sure you have error detection in place (it is common to get a loss shortly after first lock. Not sure why.)
+int activateGPS(){
 
   delay(5000);
 
@@ -413,53 +446,43 @@ int activateGPS_2(){
   return true;
 }
 
-// Turn on and configure the GPS/GNSS system
-// It will take AT LEAST 130 seconds to get a fix.
-// Poll AT+CGPSINFO or AT+CGNSSINFO until you get a valid result.
-// Calls to the xINFO commands may fail even after a lock is acheived,
-// so make sure you have error detection in place
-int activateGPS_1() {
-  // Turn on the GNSS (GPS, satellite navigation) module.
-  // This can take a while to turn on, so we have to wait for a return call
-  int reply = sendCommand("AT+CGDRT=4,1"); // Set the direction of specified GPIO
-  if (reply==false) {Serial.println(F("Fail: GPS/GNSS prep 1")); return false; }
-  delay(2000);
-  reply = sendCommand("AT+CGSETV=4,0"); // Set the value of specified GPIO
-  if (reply==false) {Serial.println(F("Fail: GPS/GNSS prep 2")); return false; }
-  delay(2000);
+// Read the ESP32 real-time-clock, and write the
+// result the the serial connection.
+void readRtc(){
+  struct tm local = {0};
+  getLocalTime(&local);
+  int year = local.tm_year+1900;
+  int month = local.tm_mon + 1;
 
-  // turn off power
-  reply = sendCommand("AT+CGNSSPWR=0");
-  if (reply==false) {Serial.println(F("Fail: GPS/GNSS prep ")); return false; }
-  delay(2000);
+  Serial.printf("%d-%02d-%02d T %02d:%02d:%02d\r\n",year, month, local.tm_mday, local.tm_hour, local.tm_min, local.tm_sec);
+}
 
-  // turn on power
-  reply = sendCommand("AT+CGNSSPWR=1");
-  if (reply==false) {Serial.println(F("Fail: GPS/GNSS prep 2")); return false; }
-  delay(2000);
+void setRtcTimeRaw(unsigned long epoch, int ms) {
+  struct timeval tv;
+  if (epoch > 2082758399){
+	  tv.tv_sec = epoch - 2082758399;  // epoch time (seconds)
+  } else {
+	  tv.tv_sec = epoch;  // epoch time (seconds)
+  }
+  tv.tv_usec = ms;    // microseconds
+  settimeofday(&tv, NULL);
+}
 
-  // wait for the ready signal
-  reply = waitForMessage("+CGNSSPWR: READY!", 12000);
-  if (reply==false) {Serial.println(F("GNSS module did not reply within wait period")); return false; }
-  Serial.println(F("GNSS module is ready."));
-
-  delay(2000);
-  reply = sendCommand("AT+CGNSSMODE=3"); // Configure GNSS support mode: 1=GPS;2=BDS;3=GPS+BDS;4=GLONASS;5=GPS+GLONASS;6=BDS+GLONASS;7=GPS+BDS+GLONASS
-  if (reply==false) {Serial.println(F("Fail: GPS/GNSS prep 4")); return false; }
-  delay(2000);
-  reply = sendCommand("AT+CGNSSNMEA=1,1,1,1,1,1,0,0"); // Configure NMEA sentence type
-  if (reply==false) {Serial.println(F("Fail: GPS/GNSS prep 5")); return false; }
-  delay(2000);
-  reply = sendCommand("AT+CGPSNMEARATE=2"); // Set NMEA output rate: 1=1Hz; 2=2Hz; 4=4Hz; 5=5Hz; 10=10Hz;
-  if (reply==false) {Serial.println(F("Fail: GPS/GNSS prep 6")); return false; }
-  delay(2000);
-
-  reply = sendCommand("AT+CGNSSINFO=1");
-  if (reply==false) {Serial.println(F("GPS test mode failed")); return false; }
-  delay(1000);
-
-  Serial.println("GPS should be starting. Going to loop waiting for location");
-  return true;
+// set the internal RTC time
+// sc second (0-59); mn minute (0-59); hr hour of day (0-23); dy day of month (1-31);
+// mt month (1-12); yr year ie 2021; ms microseconds (optional, pass zero if not known)
+void setRtcTime(int sc, int mn, int hr, int dy, int mt, int yr, int ms) {
+  // seconds, minute, hour, day, month, year $ microseconds(optional)
+  // ie setTime(20, 34, 8, 1, 4, 2021) = 8:34:20 1/4/2021
+  struct tm t = {0};        // Initalize to all 0's
+  t.tm_year = yr - 1900;    // This is year-1900, so 121 = 2021
+  t.tm_mon = mt - 1;
+  t.tm_mday = dy;
+  t.tm_hour = hr;
+  t.tm_min = mn;
+  t.tm_sec = sc;
+  time_t timeSinceEpoch = mktime(&t);
+  setRtcTimeRaw(timeSinceEpoch, ms);
 }
 
 int alive = false;
@@ -481,6 +504,9 @@ void setup() {
     return; // jump to main loop, where we will re-enter deep sleep.
   }
 
+  // Print the ESP32 time. Will this be zero after power failure?
+  readRtc();
+
   // Connect serial to the SIMCOM module
   SerialAT.begin(115200, SERIAL_8N1, PIN_RX, PIN_TX);  // ESP32 <-> SIMCOM
   delay(1000);
@@ -490,11 +516,15 @@ void setup() {
   if (reply == false) {Serial.println(F("Failed to start SIMCOM modem")); return; }
   delay(1000);
 
+  // We could now make HTTP calls
+  Serial.print("Modem ready at ");
+  readRtc();
+
   // Test one:
   //makeHttpCall();
 
   // Wake up the GPS system. It takes ages when it works at all.
-  reply = activateGPS_2();
+  reply = activateGPS();
   if (reply == false) {Serial.println(F("Failed to start GPS sub-system. Reboot modem")); return; }
 
   // Request CPU temperature reading
@@ -507,12 +537,15 @@ void setup() {
   reply = sendCommand("AT+CBC");
   if (reply==false) {Serial.println(F("Failed to read SIMCOM supply voltage"));}
 
+  Serial.print("Set-up complete. Going to main loop ");
   alive = true;
+  readRtc();
 }
 
 int i = 0;
-int gotLock = false;
-int gpsData[40]; // really, we get up to 16 data points, but might read those as two ints
+int gotLock = false;      // do we currently have a GPS lock? Get reset if lock is lost
+int everHadLock = false;  // have we ever had a lock since power-up?
+int gpsData[40];          // we get up to 16 data points, but might read those as two ints
 int firstLockMin=0, firstLockSec=0;
 
 void loop() {
@@ -577,16 +610,16 @@ void loop() {
     if (gps==NULL) {Serial.println(F("Failed to read GPS location")); }
     else {
       int got = readNumberSet(gps, 36, gpsData); // NOTE: this reads 12.34 as two integers: 12, and 34
-      if (got < 1){
+      if (got < 6){
         gotLock = false;
-        Serial.println(F("No GPS data"));
+        Serial.printf("No GPS data (%d)\n", got);
       } else {
         Serial.printf("Found %d datapoints in GPS: ", got);
         for (int j = 0; j < got && j < 40; j++){
           Serial.printf("%d, ", gpsData[j]);
         }
 
-
+// TODO: pull this out to a function
         long lat_a = gpsData[0];
         long lat_b = gpsData[1];
         long lon_a = gpsData[2];
@@ -594,6 +627,11 @@ void loop() {
 
         long date = gpsData[4];  // like 080223
         long time = gpsData[5];  // like 150151
+
+        if (date == 0){
+          Serial.println("Invalid date from GPS. Ignoring.");
+          return;
+        }
 
         long hours24 = time / 10000;
         long minutes = (time / 100) % 100;
@@ -605,6 +643,22 @@ void loop() {
 
         // Set time like this: `AT+CCLK="14/01/01,02:14:36+08"`
         // Format is "yy/MM/dd,hh:mm:ss±zz", no optional parts
+
+        // Set ESP32 RTC based on GPS time
+        setRtcTime(seconds, minutes, hours24, day, month, year+2000, 0);
+
+        // Set SIMCOM clock based on GPS time
+        char *setTimeCmd;
+        if (0 > asprintf(&setTimeCmd, "AT+CCLK=\"%02d/%02d/%02d,%02d:%02d:%02d+00\"",
+                        year, month, day, hours24, minutes, seconds)) {
+          Serial.println("Failed to generate SIMCOM clock command");
+        } else {
+          Serial.println(&setTimeCmd[0]);
+          int reply = sendCommand(setTimeCmd);
+          if (reply == false) {Serial.println(F("Failed to set SIMCOM clock from GPS time"));}
+          else {Serial.println(F("Updated SIMCOM time from GPS"));}
+          free(setTimeCmd);
+        }
 
 
         long lat_deg = lat_a / 100;
@@ -618,9 +672,9 @@ void loop() {
         lon_deg = -lon_deg; // TODO: detect W or E. Do the inversion for W only?
 
         Serial.printf("\r\nGPS:  https://www.openstreetmap.org/#map=19/%d.%05d/%d.%05d", lat_deg, lat_b, lon_deg, lon_b);
-
         Serial.println();
-        if (!gotLock){
+
+        if (!everHadLock){ // if this is the first lock since start-up, send it back to home server
           firstLockMin=mins; firstLockSec=secs;
           // Send our acquisition to remote server
           char *httpMsgStr;
@@ -630,11 +684,12 @@ void loop() {
             Serial.println("Failed to generate HTTP message");
           } else {
             Serial.println(&httpMsgStr[0]);
-            makeHttpCall(httpMsgStr);
+            makeHttpCall(httpMsgStr); // enable to really send the message
           }
           free(httpMsgStr);
         }
         gotLock = true;
+        everHadLock = true;
       }
     }
 
