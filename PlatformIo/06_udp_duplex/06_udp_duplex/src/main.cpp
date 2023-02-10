@@ -6,8 +6,9 @@
 
 #define SerialAT Serial1
 
-#define uS_TO_S 1000000ULL  // Conversion factor for micro seconds to seconds
-#define TIME_TO_SLEEP 60    // Time ESP32 will go to sleep (in seconds)
+#define S_TO_uS 1000000ULL  // Conversion factor for seconds to micro seconds
+#define ONE_MINUTE_S 60    // Time ESP32 will go to sleep (in seconds)
+#define ONE_HOUR_S 3600    // Time ESP32 will go to sleep (in seconds)
 
 // USB Serial between PC and ESP32
 #define USB_BAUD 9600
@@ -87,6 +88,41 @@ int sendCommand(const char* cmd) {
   }
   delay(500);
   return false;
+}
+
+// Wait for a message to arrive on the AT interface,
+// and return any extra data waiting after the message
+const char* waitForMessageAndRead(const char* terminate, int waitPeriod, bool echo){
+  int waited = 0;
+  int index = -1;
+  int len = strlen(terminate);
+  if (len < 1) return NULL;
+
+  String needle = String(terminate);
+
+  while (waited < waitPeriod){
+
+    if (SerialAT.available()) {
+        String r = SerialAT.readString();
+        if (echo){
+          Serial.print("\n>>>\n");
+          Serial.println(r);
+          Serial.println("<<<");
+        }
+
+        index = r.indexOf(needle);
+        if (index >= 0) {
+          Serial.printf("Found message '%s'; Continuing!\r\n", terminate);
+          return r.substring(index+len).c_str();
+        }
+      }
+
+    Serial.print(".");
+    delay(250);
+    waited+=250;
+  }
+  Serial.printf("Did not see message '%s'\r\n", terminate);
+  return NULL;
 }
 
 // Wait for a message to arrive on the AT interface
@@ -232,10 +268,7 @@ int modemTurnOn() {
     Serial.println(F("** Failed to connect to the modem! Check the baud and try again.**"));
     return false;
   }
-  atWait();
 
-  atWait();
-  sendCommand("AT+CCLK?"); // get clock setting from modem
   atWait();
   Serial.println(F("Modem is active and ready"));
   return true;
@@ -254,6 +287,66 @@ void modemTurnOff(){
 void queryOperatorNames(){
   int reply = sendCommand("AT+COPN");
   if (reply == false) Serial.println("Failed to read operator list");
+}
+
+// Start socket services for sending raw UDP data
+int modemEnableData(){
+  int reply = sendCommand("AT+NETOPEN");
+  if (reply == false) { Serial.println("Failed to open network session"); return false; }
+
+  reply = sendCommand("AT+CIPOPEN=3,\"UDP\",,,42069"); // Open a UDP session on line 3, local port 42069
+  if (reply == false) {
+    Serial.println("Failed to open UDP session");
+    sendCommand("AT+NETCLOSE"); // try to close data session
+    return false;
+  }
+
+  return true;
+}
+
+// Stop socket services for sending raw UDP data
+int modemDisableData(){
+  int reply = sendCommand("AT+CIPCLOSE=3"); // Close any session on line 3
+  if (reply == false) Serial.println("Failed to close network session"); // still try to close network service
+
+  reply = sendCommand("AT+NETCLOSE");
+  if (reply == false) { Serial.println("Failed to close network session"); return false; }
+
+  return true;
+}
+
+// Send a basic test message to a network device
+int modemSendUdp(){
+  // AT+CIPSEND=<link_num>,<length>,<serverIP>,<serverPort>
+  sendData("AT+CIPSEND=3,29,\"185.81.252.44\",420");
+  atWait();
+  sendData("Hello, Server! This is T-SIM.\n");
+  delay(1000); // wait for remote server
+
+  const char* msg = waitForMessageAndRead("+IPD", 12000, /*echo*/false); // wait for server to reply with data
+  if (msg == NULL){
+    Serial.println("Timeout waiting for server to reply.");
+    return false;
+  } else {
+    Serial.printf("Reply from server >>>\n%s\n<<<\n", msg); // output. Should be byte length, \n\n, reply data
+  }
+
+  return true;
+
+  /* // This should not be required, as receive mode is '0' by default, which directly outputs data onto the serial ('COM') port
+  // Read buffered result
+  const char* result = readCommand("AT+CIPRXGET=2,3"); // ASCII Mode (2) on connection 3
+  if (result == NULL){
+    Serial.println("Failed to read server reply");
+    return false;
+  } else {
+    Serial.printf("Server replied: >>>\n%s\n<<<\n", result);
+    return true;
+  }*/
+
+  // AT+CIPRXGET=2,<link_num>    // <-- read all buffered data as ASCII string (raw?)
+  // AT+CIPRXGET=3,<link_num>    // <-- read all buffered data as HEX string
+  //delay();
 }
 
 void setup() {
@@ -280,31 +373,36 @@ void setup() {
   // turn the modem on
   int reply = modemTurnOn();
   if (reply == false) {Serial.println(F("Failed to start SIMCOM modem")); return; }
-  delay(1000);
-
-  // We could now make HTTP calls
-  Serial.println("Modem ready");
-
-  // Request CPU temperature reading
+  
   atWait();
-  reply = sendCommand("AT+CPMUTEMP");
-  if (reply==false) {Serial.println(F("Failed to read SIMCOM CPU temperature"));}
-
-  // Request supply voltage
+  Serial.println("Modem ready, Attempting UDP exchange");
   atWait();
-  reply = sendCommand("AT+CBC");
-  if (reply==false) {Serial.println(F("Failed to read SIMCOM supply voltage"));}
+  reply = modemEnableData();
+  if (reply == true){
+    Serial.println("Data connection up. Trying to send test message");
+    reply = modemSendUdp();
+    if (reply == false) Serial.println("Problem sending message");
+    reply = modemDisableData();
+    if (reply == false) Serial.println("Problem disabling data connection");
+    else Serial.println("Data connection down.");
+  } else {
+    Serial.println("Failed to enable data");
+  }
 
-  Serial.print("Set-up complete. Going to main loop ");
+  atWait();
+  Serial.println("Set-up complete. Going to main loop ");
 }
 
 void loop() {
   // Drop directly into deep sleep
+
+  Serial.print("Turning off modem...");
   modemTurnOff();
   atWait();
-  Serial.print("Z");
-  esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S);
+  Serial.print("Sleeping... Z");
+  esp_sleep_enable_timer_wakeup(ONE_HOUR_S * S_TO_uS);
   Serial.print("z");
   delay(200);
+  Serial.print("z");
   esp_deep_sleep_start(); // never returns. We will get reset with DEEPSLEEP_RESET
 }

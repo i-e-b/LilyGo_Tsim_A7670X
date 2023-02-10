@@ -186,11 +186,10 @@ Try running `dmesg` or `journalctl -k` while doing an upload, look for any USB i
 
 **Cause:** Missing Python modules (python is used in cross-compiler workflow)
 
-**Fix:**
+**Fix:** In a terminal:
 
-In a terminal:
 ```
-pip3 install pyserial
+ pip3 install pyserial
 ```
 
 if you get an error that `pip3` is not found, install Python version 3.
@@ -203,6 +202,7 @@ sudo apt install python3-pip
 ### If you can't connect to the board
 
 **Diagnosis:** At the bottom-right of the Arduino window, it says
+
 ```
 ESP32 Wrover Module [not connected]
 ```
@@ -240,7 +240,7 @@ In VSCode:
 
 When creating a new project:
 - **Name:** the new project name. Use characters [a-z0-9_-], no spaces or caps. PlatformIO can be fussy.
-- **Board:** `Espressif ESP-WROVER-KIT`
+- **Board:** `Espressif ESP32 Dev Module`
 - **Framework:** Arduino
 - **Location:** Storage location. Use characters [a-z0-9_-], no spaces or caps. PlatformIO can be fussy.
 
@@ -274,3 +274,15 @@ https://docs.platformio.org/en/latest/integration/ide/clion.html
 
 Going to try the VSCode integration before looking into CLion.
 
+# T-SIM 7670E ESP config
+
+```
+CONFIGURATION: https://docs.platformio.org/page/boards/espressif32/esp32dev.html
+PLATFORM: Espressif 32 (6.0.1) > Espressif ESP32 Dev Module
+HARDWARE: ESP32 240MHz, 320KB RAM, 4MB Flash
+AVAILABLE: cmsis-dap, esp-bridge, esp-prog, espota, esptool, iot-bus-jtag, jlink, minimodule, olimex-arm-usb-ocd, olimex-arm-usb-ocd-h, olimex-arm-usb-tiny-h, olimex-jtag-tiny, tumpa
+CURRENT: upload_protocol = esptool
+Chip is ESP32-D0WD-V3 (revision v3.0)
+Features: WiFi, BT, Dual Core, 240MHz, VRef calibration in efuse, Coding Scheme None
+Crystal is 40MHz
+```
