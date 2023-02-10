@@ -28,9 +28,9 @@ internal static class Program
 
     private static void TestHandler(byte[] data, IPEndPoint remoteCaller, IUdpSender returnPath)
     {
-        Log.Info($"Got message to port 400, from {remoteCaller.Address}:{remoteCaller.Port}");
+        Log.Info($"Got message to port 420, from {remoteCaller.Address}:{remoteCaller.Port}");
         Log.Info(Encoding.UTF8.GetString(data));
         
-        returnPath.SendData(Encoding.UTF8.GetBytes($"Hello from server, {remoteCaller.Address}:{remoteCaller.Port}"));
+        returnPath.SendData(Encoding.UTF8.GetBytes($"Hello from server, {remoteCaller.Address}:{remoteCaller.Port}!\n"));
     }
 }

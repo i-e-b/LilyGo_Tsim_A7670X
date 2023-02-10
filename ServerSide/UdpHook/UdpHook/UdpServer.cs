@@ -77,21 +77,31 @@ public class UdpServer : IDisposable
     {
         var responder = _responders[port];
         var sender = new IPEndPoint(IPAddress.Any, 0);
+        
+        Log.Info($"Listening for messages on port {port}...");
         while (_running)
         {
             try
             {
-                Log.Info($"Listening for messages on port {port}...");
+                if (responder.Client.Available <= 0)
+                {
+                    Thread.Sleep(500);
+                    continue; // check we are still running
+                }
+
                 var buffer = responder.Client.Receive(ref sender);
                 TotalIn += (ulong)buffer.Length;
                 var returnPath = new UpdSender(responder.Client, sender, this);
                 responder.Action(buffer, sender, returnPath);
+                
+                Log.Info($"Transaction complete. Total data in={TotalIn}, out={TotalOut};");
             }
             catch (Exception ex)
             {
-                Log.Error("Failure in IKE loop", ex);
+                Log.Error($"Failure in ListenLoop loop for port {port}", ex);
             }
         }
+        Log.Info($"Closing listener for port {port}...");
     }
 
     public void Start()
