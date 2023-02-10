@@ -276,6 +276,14 @@ void modemTurnOff(){
   atWait();
 }
 
+// Ask the SIMCOM modem for the available telecom operators
+// This is a very long list of the known operator IDs in the
+// current firmware. It is NOT the available operators at the nearest tower.
+void queryOperatorNames(){
+  int reply = sendCommand("AT+COPN");
+  if (reply == false) Serial.println("Failed to read operator list");
+}
+
 #define isInt(c) (c >= 0 && c <= 9)
 #define notNull(c) (c != 0)
 
@@ -425,24 +433,23 @@ int readNumberSet(const char* src, int maxCount, int* target){
 // Calls to the xINFO commands may fail even after a lock is acheived,
 // so make sure you have error detection in place (it is common to get a loss shortly after first lock. Not sure why.)
 int activateGPS(){
-
-  delay(5000);
+  delay(1000);
 
   // turn on power
   int reply = sendCommand("AT+CGNSSPWR=1");
   if (reply==false) {Serial.println(F("Fail: GPS/GNSS power on")); return false; }
-  delay(2000);
+  delay(1000);
 
   // wait for the ready signal
   reply = waitForMessage("+CGNSSPWR: READY!", 12000);
   if (reply==false) {Serial.println(F("GNSS module did not reply within wait period")); return false; }
   Serial.println(F("GNSS module is powered on"));
 
-  delay(2000);
-  reply = sendCommand("AT+CGNSSTST=1"); // Send data from UART3 to NMEA ... ?
-  if (reply==false) {Serial.println(F("Fail: send data received from UART3 to NMEA port")); return false; }
+  //delay(2000);
+  //reply = sendCommand("AT+CGNSSTST=1"); // Send data from UART3 to NMEA ... ?
+  //if (reply==false) {Serial.println(F("Fail: send data received from UART3 to NMEA port")); return false; }
 
-  delay(2000);
+  delay(1000);
   return true;
 }
 
@@ -606,7 +613,7 @@ void loop() {
 */
     delay(1000);
 
-    const char* gps = readCommand("AT+CGPSINFO");
+    const char* gps = readCommandQuiet("AT+CGPSINFO");
     if (gps==NULL) {Serial.println(F("Failed to read GPS location")); }
     else {
       int got = readNumberSet(gps, 36, gpsData); // NOTE: this reads 12.34 as two integers: 12, and 34
@@ -647,19 +654,6 @@ void loop() {
         // Set ESP32 RTC based on GPS time
         setRtcTime(seconds, minutes, hours24, day, month, year+2000, 0);
 
-        // Set SIMCOM clock based on GPS time
-        char *setTimeCmd;
-        if (0 > asprintf(&setTimeCmd, "AT+CCLK=\"%02d/%02d/%02d,%02d:%02d:%02d+00\"",
-                        year, month, day, hours24, minutes, seconds)) {
-          Serial.println("Failed to generate SIMCOM clock command");
-        } else {
-          Serial.println(&setTimeCmd[0]);
-          int reply = sendCommand(setTimeCmd);
-          if (reply == false) {Serial.println(F("Failed to set SIMCOM clock from GPS time"));}
-          else {Serial.println(F("Updated SIMCOM time from GPS"));}
-          free(setTimeCmd);
-        }
-
 
         long lat_deg = lat_a / 100;
         long lon_deg = lon_a / 100;
@@ -674,9 +668,22 @@ void loop() {
         Serial.printf("\r\nGPS:  https://www.openstreetmap.org/#map=19/%d.%05d/%d.%05d", lat_deg, lat_b, lon_deg, lon_b);
         Serial.println();
 
-        if (!everHadLock){ // if this is the first lock since start-up, send it back to home server
-          firstLockMin=mins; firstLockSec=secs;
+        if (!everHadLock) { // if this is the first lock since start-up, send it back to home server
+          // Set SIMCOM clock based on GPS time
+          char *setTimeCmd;
+          if (0 > asprintf(&setTimeCmd, "AT+CCLK=\"%02d/%02d/%02d,%02d:%02d:%02d+00\"",
+                          year, month, day, hours24, minutes, seconds)) {
+            Serial.println("Failed to generate SIMCOM clock command");
+          } else {
+            Serial.println(&setTimeCmd[0]);
+            int reply = sendCommand(setTimeCmd);
+            if (reply == false) {Serial.println(F("Failed to set SIMCOM clock from GPS time"));}
+            else {Serial.println(F("Updated SIMCOM time from GPS"));}
+            free(setTimeCmd);
+          }
+
           // Send our acquisition to remote server
+          firstLockMin=mins; firstLockSec=secs;
           char *httpMsgStr;
           // Found 11 datapoints in GPS: 5149, 48561, 301, 87739, 80223, 125658, 0, 114, 0, 0, 579, 
           if (0 > asprintf(&httpMsgStr, "T-SIM got a GPS lock. Time=%02d:%02d:%02d; Date=20%02d-%02d-%02d; Location=https://www.openstreetmap.org/#map=19/%d.%05d/%d.%05d",
@@ -685,8 +692,8 @@ void loop() {
           } else {
             Serial.println(&httpMsgStr[0]);
             makeHttpCall(httpMsgStr); // enable to really send the message
+            free(httpMsgStr);
           }
-          free(httpMsgStr);
         }
         gotLock = true;
         everHadLock = true;
