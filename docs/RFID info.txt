@@ -1,0 +1,21 @@
+# RFID board
+
+## Ebay details
+
+https://www.ebay.co.uk/itm/284816778732?var=586511948077
+
+PN532 NFC RFID V3 Near Field Communication Reader Module SPI with S50 White Card
+Features: Support NFC RFID reading and writing, P2P communication with peers.
+Support I2C, SPI and HSU- (High Speed UART), easy to change among these modes.
+On-board level shifter, standard 5V TTL for I2C and UART, 3.3V TTL SPI.
+compatible for Arduino Raspberry Pi compatible, Small Size and easy to embed into your project.
+RFID reader/writer supports: Mifare- 1k, 4k, Ultralight, and DesFire cards, ISO/IEC 14443-4 cards such as CD97BX, CD light, Desfire, P5CN072 (SMX-), Innovision- Jewel cards such as IRT5001 card, FeliCa cards such as RCS_860 and RCS_854.
+
+Specification: Material:PCB
+Size:As Picture Shown
+
+Package Includes: 1x Wireless Module
+
+note: 1.Please allow 1-2cm errors due to manual measurement, make sure that you do not mind before you order.
+2.Due to the difference between different monitors, the picture may not reflect the actual color of the item.
+Thanks for your understandings.
