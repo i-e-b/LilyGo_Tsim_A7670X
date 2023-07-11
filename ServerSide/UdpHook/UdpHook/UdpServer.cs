@@ -19,7 +19,8 @@ public class UpdSender : IUdpSender
     public void SendData(byte[] data)
     {
         _parent.TotalOut += (ulong)data.Length;
-        _connection.Send(data, data.Length, _target);
+        var bytes = _connection.Send(data, data.Length, _target);
+        Log.Info($"{bytes} bytes sent to {_target}");
     }
 }
 
