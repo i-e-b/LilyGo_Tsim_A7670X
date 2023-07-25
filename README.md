@@ -1,6 +1,19 @@
 # LilyGo_Tsim_A7670X
 T-SIM A7670 E development setup, tests, and notes
 
+## Recovery
+
+If the bootloader/code/UART-to-USB get damaged,
+you can hook up a serial reader to the TX/RX pins,
+then
+
+1. Press and hold `IO0`
+2. Press and release `RST`
+3. Release `IO0`
+
+The device should now respond to `esptool` etc, and be programmable.
+Resetting the device may set it back to the broken program.
+
 ## General notes
 
 None of the built-in LEDs can be directly flashed by the ESP32 CPU.
@@ -8,6 +21,9 @@ None of the built-in LEDs can be directly flashed by the ESP32 CPU.
 * The blue LEDs are under control of the CN3065 charge controller. They are `CHRG` and `STDBY`.
 
 The *Table of Contents* in the SIMCOM datasheet starts page 20.
+
+The MAX3232 chip mini-break-out boards introduce a *lot* of noise when you use both sides.
+Use one chip per pair of data lines. (Currently running 3: Serial0, SerialEwc, and CTS/Active flag)
 
 ## SIM setup
 

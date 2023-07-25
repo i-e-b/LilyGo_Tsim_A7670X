@@ -28,6 +28,7 @@
 
 // UART comms between ESP32 and EWC
 #define EWC_BAUD 9600
+#define PIN_EWC_CTS 5
 #define PIN_EWC_TX 21
 #define PIN_EWC_RX 22
 
@@ -356,6 +357,11 @@ int modemSendUdp(){
   //delay();
 }
 
+
+bool _ctsFlag;
+bool _haveTriggeredCommand;
+char ewcMsgBuf[128];
+
 void setup() {
  // Connect to USB serial port if available
   Serial.begin(USB_BAUD);
@@ -382,35 +388,8 @@ void setup() {
   // Connect serial to the EWC module
   pinMode(PIN_EWC_TX, OUTPUT);
   pinMode(PIN_EWC_RX, INPUT);
+  pinMode(PIN_EWC_CTS, INPUT);
   SerialEWC.begin(EWC_BAUD, SERIAL_8N1, PIN_EWC_RX, PIN_EWC_TX);  // ESP32 <-> EWC
-
-  // Testing: Listen for EWC messages (blindly at first)
-  /*
-  New USB device found, idVendor=1a86, idProduct=55d4, bcdDevice= 4.44
-[ 1414.770894] usb 3-5.4: New USB device strings: Mfr=0, Product=2, SerialNumber=3
-[ 1414.770898] usb 3-5.4: Product: USB Single Serial
-[ 1414.770901] usb 3-5.4: SerialNumber: 54D8002610
-[ 1415.381641] usb 3-5.4: USB disconnect, device number 10
-*/
-
-  Serial.print(".");
-  while (true)
-  {
-    //delayMicroseconds(104);
-    //digitalWrite(PIN_EWC_TX, HIGH);
-    //delayMicroseconds(104);
-    //digitalWrite(PIN_EWC_TX, LOW);
-    //delay(500);
-    //SerialEWC.println("EWC serial out 1");
-    //delay(500);
-    //Serial.println("Main serial out 2");
-    //SerialEWC.println("EWC serial out 2");
-
-    if (SerialEWC.available() > 0){
-      Serial.println(SerialEWC.readString());
-    }
-    delay(1);
-  }
 
   Serial.print("LEFT THE BIG LOOP");
   delay(250);
@@ -442,21 +421,52 @@ void setup() {
   atWait();
   Serial.println("Set-up complete. Going to main loop ");
   */
+ _haveTriggeredCommand = false;
 }
 
 void loop() {
   // Drop directly into deep sleep
 
+  bool newCtsFlag = !digitalRead(PIN_EWC_CTS);
+  if (newCtsFlag && !_ctsFlag){
+    Serial.print(" CTS on;");
+    _ctsFlag = true;
+    if (!_haveTriggeredCommand){ // do this just once
+      _haveTriggeredCommand = true;
+      // Request EWC clock. Response should be 8054...03xx
+      //SerialEWC.write(0x54);
+      //SerialEWC.write(0x03);
+      //SerialEWC.write(0x57);
+
+      int sttuMsg[12] = {0x4c, 0x00, 0xd4, 0x3d, 0x46, 0xa5, 0x00, 0x00, 0xff, 0xff, 0x03, 0x45}; // super-tap top-up for slot 0
+      for (int i = 0; i < 12; i++){
+        SerialEWC.write(sttuMsg[i]);
+      }
+    }
+  } else if (!newCtsFlag && _ctsFlag){
+    Serial.print(" CTS off;");
+    _ctsFlag = false;
+  }
+
+  int available = SerialEWC.available();
+  if (available > 0){
+    int actual = SerialEWC.readBytes(ewcMsgBuf, available);
+    //Serial.printf("%d of %d: ", actual, available);
+    for (int i = 0; i < actual; i++){
+      Serial.printf("%02X", (unsigned char)ewcMsgBuf[i]);
+    }
+  }
 
   //SerialEWC.println("Hello, EWC");
 /*
   Serial.print("Turning off modem...");
   modemTurnOff();
   atWait();*/
-  Serial.print("Sleeping... Z");
-  esp_sleep_enable_timer_wakeup(ONE_HOUR_S * S_TO_uS);
-  Serial.print("z");
-  delay(200);
-  Serial.print("z");
-  esp_deep_sleep_start(); // never returns. We will get reset with DEEPSLEEP_RESET
+  //Serial.print("Sleeping... Z");
+  //esp_sleep_enable_timer_wakeup(ONE_HOUR_S * S_TO_uS);
+  //Serial.print("z");
+  //delay(200);
+  //Serial.print("z");
+  //delay(200);
+  //esp_deep_sleep_start(); // never returns. We will get reset with DEEPSLEEP_RESET
 }
