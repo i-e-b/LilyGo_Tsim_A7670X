@@ -25,6 +25,16 @@ The *Table of Contents* in the SIMCOM datasheet starts page 20.
 The MAX3232 chip mini-break-out boards introduce a *lot* of noise when you use both sides.
 Use one chip per pair of data lines. (Currently running 3: Serial0, SerialEwc, and CTS/Active flag)
 
+The antenna connectors are IPex MHF-4 type: https://www.i-pex.com/product/mhf-4
+(the larger screw-on type are SMA type: https://en.wikipedia.org/wiki/SMA_connector )
+
+## Peripheral parts
+
+- 3.0V..40V to 1.5V..35V buck converter (for power supply) https://www.amazon.co.uk/Adjustable-Step-Down-Converter/dp/B08PNV2GXT
+- RS232 level converter break-out board (Ti MAX232 chip) https://www.mikroe.com/max232-board
+- RS232 level converter break-out board (SP3232 chip) https://www.amazon.co.uk/gp/product/B00KM6XD1A/
+- Mini RS232 level converted (knock-off chip) https://www.amazon.co.uk/gp/product/B07XM6RNZG
+
 ## SIM setup
 
 I am using a SIM card from https://hologram.io/ , with the Pilot (1MB) plan.

@@ -31,6 +31,7 @@ internal static class Program
             var msg = Console.ReadLine();
             if (msg?.ToLowerInvariant().Contains("quit") == true) break;
             if (msg?.ToLowerInvariant().Contains("close") == true) _holdOpen = false;
+            if (msg?.ToLowerInvariant().Contains("ping") == true) _lastReturn?.SendData(Encoding.UTF8.GetBytes("Ping from server"));
         }
 
         Log.Info("Stopping UDP/TCP servers");
@@ -97,10 +98,11 @@ internal static class Program
 
     private static void TestUdpHandler(byte[] data, IPEndPoint remoteCaller, IUdpSender returnPath)
     {
+        var msgStr = Encoding.UTF8.GetString(data);
         Log.Info($"Got message to port 420, from {remoteCaller.Address}:{remoteCaller.Port}");
-        Log.Info(Encoding.UTF8.GetString(data));
+        Log.Info(msgStr);
 
         _lastReturn = returnPath;
-        returnPath.SendData(Encoding.UTF8.GetBytes($"Hello from server, {remoteCaller.Address}:{remoteCaller.Port}!\n"));
+        returnPath.SendData(Encoding.UTF8.GetBytes($"Reply from server. You are {remoteCaller.Address}:{remoteCaller.Port}; You said \"{msgStr}\"\n"));
     }
 }

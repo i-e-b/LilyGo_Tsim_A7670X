@@ -20,7 +20,7 @@ public class UpdSender : IUdpSender
     {
         _parent.TotalOut += (ulong)data.Length;
         var bytes = _connection.Send(data, data.Length, _target);
-        Log.Info($"{bytes} bytes sent to {_target}");
+        Log.Info($"{bytes} bytes out of {data.Length} sent to {_target}");
     }
 }
 
