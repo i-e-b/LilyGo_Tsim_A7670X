@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<module classpath="CMake" type="CPP_MODULE" version="4">
+  <component name="FacetManager">
+    <facet type="Python" name="Python facet">
+      <configuration sdkName="Python 3.10 virtualenv at ~/.espressif/python_env/idf5.2_py3.10_env" />
+    </facet>
+  </component>
+</module>
